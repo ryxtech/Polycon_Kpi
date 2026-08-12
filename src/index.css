@@ -1,0 +1,311 @@
+@import 'tailwindcss';
+
+/*
+ * Soft premium analytics. Mirrors src/config/theme.ts.
+ *
+ * DM Sans throughout, with tabular figures switched on globally — a geometric
+ * sans with `tnum` gives column alignment without the technical, terminal-like
+ * feel a monospace face brings to a client-facing report.
+ */
+@theme {
+  --color-primary: #4f46e5;
+  --color-primary-deep: #4338ca;
+  --color-primary-soft: #818cf8;
+  --color-primary-wash: #eef0fe;
+  --color-violet: #7c3aed;
+  --color-accent: #f97316;
+
+  --color-canvas: #edeff8;
+  --color-canvas-deep: #e4e7f4;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f8fd;
+  --color-surface-sunken: #f1f3fb;
+
+  --color-ink: #171a2b;
+  --color-ink-muted: #4c5270;
+  --color-ink-faint: #5d6484;
+
+  --color-hairline: #e6e9f5;
+  --color-gridline: #edeff8;
+
+  --color-ok: #16a34a;
+  --color-warn: #c2680a;
+  --color-critical: #ef4444;
+  --color-critical-text: #c81e1e;
+
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-card: 20px;
+  --radius-inner: 12px;
+  --radius-chip: 999px;
+
+  --shadow-rest: 0 1px 2px rgba(23, 26, 43, 0.04), 0 6px 20px rgba(23, 26, 43, 0.05);
+  --shadow-lift: 0 2px 4px rgba(23, 26, 43, 0.05), 0 14px 34px rgba(23, 26, 43, 0.09);
+  --shadow-float: 0 10px 20px rgba(23, 26, 43, 0.08), 0 30px 60px rgba(23, 26, 43, 0.14);
+}
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Figures that must align down a column, at a tightened tracking. */
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+@layer components {
+  /*
+   * The standard surface. Structure comes from elevation, not from borders —
+   * a hairline box on a tinted ground is what makes an interface read as dated.
+   */
+  .card {
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-rest);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .card-interactive {
+    cursor: pointer;
+    transition:
+      box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .card-interactive:hover {
+    box-shadow: var(--shadow-lift);
+    transform: translateY(-2px);
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 1.125rem 1.25rem 0.75rem;
+  }
+
+  .card-title {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--color-ink);
+  }
+
+  .card-sub {
+    font-size: 0.75rem;
+    color: var(--color-ink-faint);
+  }
+
+  .card-body {
+    padding: 0 1.25rem 1.25rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Small caps field label. */
+  .field {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--color-ink-faint);
+  }
+
+  /* Pill — tags, filters, statuses. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: var(--radius-chip);
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* Roomy data grid — generous row height, no vertical rules. */
+  .data-grid {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.8125rem;
+  }
+
+  .data-grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-surface);
+    padding: 0.5rem 1rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--color-ink-faint);
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  .data-grid tbody td {
+    padding: 0.625rem 1rem;
+    border-top: 1px solid var(--color-gridline);
+  }
+
+  .data-grid tbody tr {
+    transition: background 160ms ease;
+  }
+
+  .data-grid tbody tr:hover {
+    background: var(--color-surface-alt);
+  }
+
+  .data-grid tbody tr:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+    border-radius: var(--radius-inner);
+  }
+
+  /* Frosted layer — top bar and drawer scrim. */
+  .frosted {
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: saturate(180%) blur(16px);
+    -webkit-backdrop-filter: saturate(180%) blur(16px);
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/*
+ * Entrance motion.
+ *
+ * Content lifts 10px into place over 420ms on a decelerating curve, staggered
+ * by index so a report assembles rather than snapping in. Cheap: transform and
+ * opacity only, so it never triggers layout.
+ */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Skeleton block — shimmer reads as "loading", a grey box reads as "broken". */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface-sunken);
+  border-radius: var(--radius-inner);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.85),
+    transparent
+  );
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes drawIn {
+  from {
+    stroke-dashoffset: var(--dash-length);
+  }
+  to {
+    stroke-dashoffset: var(--dash-offset);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .rise {
+    animation: none;
+  }
+}
+
+/* Report output. Composed on screen, printed to PDF. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff;
+    font-size: 11px;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-break {
+    break-before: page;
+  }
+
+  .card {
+    box-shadow: none;
+    border: 1px solid #dfe3f0;
+    break-inside: avoid;
+  }
+
+  .rise {
+    animation: none;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+.print-only {
+  display: none;
+}
