@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs'
 const OUT =
   process.env.SHOT_DIR ??
   '/tmp/claude-1000/-home-development1-Desktop-Polycon-Kpi/80863415-050d-43c5-9440-7d9d8c97e497/scratchpad/shots'
-const BASE = process.env.BASE_URL ?? 'http://localhost:4173/'
+const BASE = process.env.BASE_URL ?? 'http://localhost:3000/'
 
 mkdirSync(OUT, { recursive: true })
 
@@ -27,10 +27,7 @@ const openPage = async (label) => {
 
 await page.goto(BASE, { waitUntil: 'networkidle' })
 
-// Capture the boot screen mid-run, then wait for it to hand over.
-await page.waitForTimeout(650)
-await shot('00-boot', { fullPage: false })
-await page.waitForTimeout(1600)
+await page.waitForTimeout(500)
 await shot('01-portfolio')
 
 // Portfolio rows are role=button; open Hirslandenklinik.
@@ -44,8 +41,11 @@ await shot('03-plan')
 await openPage('Mould readiness')
 await shot('04-moulds')
 
-await openPage('Detail')
-await shot('05-details')
+await openPage('Detailed schedule')
+await shot('05-schedule')
+
+await openPage('Raw data')
+await shot('05b-raw')
 
 await openPage('Report')
 await shot('06-export')

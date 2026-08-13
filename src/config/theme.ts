@@ -75,6 +75,18 @@ export const STATUS_LABEL = {
   critical: 'Action required',
 } as const
 
+/**
+ * Priority bands. Deliberately distinct from the status palette — a red
+ * priority means "do this first", a red status means "this is late", and
+ * conflating the two would make the timeline unreadable.
+ */
+export const PRIORITY_COLOR = {
+  critical: '#BE123C',
+  high: '#C2680A',
+  normal: '#0F766E',
+  none: '#7E89B4',
+} as const
+
 /** Mould readiness arcs. */
 export const READINESS_COLOR = {
   ready: '#16A34A',

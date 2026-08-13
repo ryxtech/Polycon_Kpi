@@ -9,6 +9,11 @@ import {
   HIRSLANDEN_DATA_AS_OF,
   HIRSLANDEN_RAW_ROWS,
 } from './hirslanden.seed'
+import {
+  SPECIMEN_BASE_YEAR,
+  SPECIMEN_DATA_AS_OF,
+  SPECIMEN_RAW_ROWS,
+} from './specimen'
 
 /**
  * Reference date for buffer calculations.
@@ -38,7 +43,30 @@ export const BEETHOVENSTRASSE: Project = {
   encodedMoulds: BEETHOVENSTRASSE_FORMS,
 }
 
-export const PROJECTS: Project[] = [HIRSLANDENKLINIK, BEETHOVENSTRASSE]
+/**
+ * The complete-data specimen.
+ *
+ * Same columns and same shape as the real workbook, plus the produced quantity
+ * and priority it lacks — so the client can see what the identical dashboard
+ * does once those two columns exist, instead of having it described.
+ */
+export const SPECIMEN: Project = {
+  id: 'specimen',
+  name: 'Sample project — complete data',
+  client: 'Specimen',
+  source: 'Constructed from the Hirslandenklinik column structure',
+  dataAsOf: SPECIMEN_DATA_AS_OF,
+  rows: normaliseRows(SPECIMEN_RAW_ROWS, SPECIMEN_BASE_YEAR),
+  specimen: true,
+  specimenNote:
+    'Not a real job. Shows what this dashboard reports once the spreadsheet carries a produced quantity and a priority.',
+}
+
+export const PROJECTS: Project[] = [
+  HIRSLANDENKLINIK,
+  BEETHOVENSTRASSE,
+  SPECIMEN,
+]
 
 export function findProject(id: string): Project | undefined {
   return PROJECTS.find((project) => project.id === id)

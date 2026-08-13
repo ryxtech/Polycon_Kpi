@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { STATUS_COLOR, STATUS_TEXT, STATUS_WASH } from '@/config/theme'
 import type { RiskFinding } from '@/types/domain'
 import { Card } from './Card'
@@ -9,6 +10,8 @@ interface AttentionPanelProps {
   /** Renders without the Card chrome, for embedding in the printed report. */
   bare?: boolean
   index?: number
+  /** Findings shown before the panel collapses the rest behind a control. */
+  limit?: number
 }
 
 const CATEGORY_LABEL: Record<RiskFinding['category'], string> = {
@@ -29,8 +32,19 @@ export function AttentionPanel({
   title = 'Attention required',
   bare = false,
   index,
+  limit = 6,
 }: AttentionPanelProps) {
+  const [expanded, setExpanded] = useState(false)
   const open = findings.filter((finding) => finding.level !== 'on-schedule').length
+
+  /*
+   * Findings arrive most-severe-first, so truncating keeps the ones that
+   * matter. A panel of fourteen is honest but unreadable — and an unreadable
+   * list of problems gets treated as no list at all.
+   */
+  const showAll = bare || expanded || findings.length <= limit
+  const visible = showAll ? findings : findings.slice(0, limit)
+  const hidden = findings.length - visible.length
 
   const body =
     findings.length === 0 ? (
@@ -39,7 +53,7 @@ export function AttentionPanel({
       </p>
     ) : (
       <ul className="space-y-2">
-        {findings.map((finding) => (
+        {visible.map((finding) => (
           <li
             key={finding.id}
             className="flex items-start gap-3 rounded-2xl px-3.5 py-3"
@@ -83,6 +97,30 @@ export function AttentionPanel({
       </ul>
     )
 
+  const withToggle = (
+    <>
+      {body}
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-3 min-h-11 w-full cursor-pointer rounded-xl bg-(--color-surface-sunken) px-3 text-[13px] font-medium text-(--color-ink-muted) transition-colors hover:text-(--color-ink)"
+        >
+          Show {hidden} more {hidden === 1 ? 'finding' : 'findings'}
+        </button>
+      )}
+      {expanded && findings.length > limit && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="mt-3 min-h-11 w-full cursor-pointer rounded-xl bg-(--color-surface-sunken) px-3 text-[13px] font-medium text-(--color-ink-muted) transition-colors hover:text-(--color-ink)"
+        >
+          Show fewer
+        </button>
+      )}
+    </>
+  )
+
   if (bare) return body
 
   return (
@@ -95,7 +133,7 @@ export function AttentionPanel({
           : `${open} open · ${findings.length} total`
       }
     >
-      {body}
+      {withToggle}
     </Card>
   )
 }

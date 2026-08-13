@@ -1,4 +1,4 @@
-import { PROCESS, WEEKLY_FORM_DAY_CAPACITY } from '@/config/process'
+import { PROCESS } from '@/config/process'
 import { STATUS_LABEL } from '@/config/theme'
 import type {
   EncodedMould,
@@ -20,26 +20,70 @@ const LEVEL_RANK: Record<RiskLevel, number> = {
 }
 
 /**
- * Weeks that need more moulds concurrently than the plant can run.
+ * Weeks demanding more pieces than their active moulds can yield.
  *
- * This is the finding the spreadsheet cannot produce on its own: it requires
- * crossing MOLD DESIGNATION with PRODUCTION (WEEK) against the stated capacity
- * of 3 forms simultaneously per day, a constant that lives in the form
- * schedule rather than the workbook.
+ * This is the finding the spreadsheet cannot make on its own: it crosses
+ * MOLD DESIGNATION with PRODUCTION (WEEK) and QTY against the production rate
+ * Marek stated — one piece per mould per working day — so a week's ceiling is
+ * `moulds x 5` pieces regardless of how much is planned into it.
  */
 export function findCapacityConflicts(load: WeekLoad[]): RiskFinding[] {
   return load
     .filter((week) => week.overCapacity || week.tightCapacity)
-    .map((week) => ({
-      id: `capacity-${week.week.year}-${week.week.week}`,
-      level: (week.overCapacity ? 'critical' : 'limited-buffer') as RiskLevel,
-      category: 'capacity' as const,
-      title: week.overCapacity
-        ? `${formatWeek(week.week)} exceeds form capacity`
-        : `${formatWeek(week.week)} has no capacity headroom`,
-      detail: `${week.mouldCount} moulds (${week.moulds.join(', ')}) need ${week.formDaysRequired} of the ${WEEKLY_FORM_DAY_CAPACITY} form-days a week provides at ${PROCESS.formsPerDay} forms per day — ${Math.round(week.utilisation * 100)}% utilisation.`,
-      refs: [formatWeek(week.week), ...week.moulds],
-    }))
+    .map((week) => {
+      const demand = Math.round(week.pieces * 10) / 10
+      const shortfall = Math.round((week.pieces - week.pieceCapacity) * 10) / 10
+
+      return {
+        id: `capacity-${week.week.year}-${week.week.week}`,
+        level: (week.overCapacity ? 'critical' : 'limited-buffer') as RiskLevel,
+        category: 'capacity' as const,
+        title: week.overCapacity
+          ? `${formatWeek(week.week)} plans more than its moulds can produce`
+          : `${formatWeek(week.week)} has no production headroom`,
+        detail: week.overCapacity
+          ? `${demand} pcs planned against a ceiling of ${week.pieceCapacity} — ${week.mouldCount} ${week.mouldCount === 1 ? 'mould' : 'moulds'} (${week.moulds.join(', ')}) at ${PROCESS.piecesPerMouldPerDay} pc/mould/day over ${PROCESS.workingDaysPerWeek} working days. Short by ${shortfall} pcs.`
+          : `${demand} of the ${week.pieceCapacity} pcs ${week.mouldCount} ${week.mouldCount === 1 ? 'mould' : 'moulds'} can yield (${week.moulds.join(', ')}) — ${Math.round(week.utilisation * 100)}% of capacity.`,
+        refs: [formatWeek(week.week), ...week.moulds],
+      }
+    })
+}
+
+/**
+ * Moulds whose quantity cannot fit the window they are scheduled in.
+ *
+ * At one piece per mould per working day a quantity *is* a duration, so this
+ * compares a mould's pieces against the working days its window contains. It
+ * is the most actionable finding the product makes: the schedule as written
+ * cannot be delivered, and the shortfall is stated in days.
+ */
+export function findInfeasibleMoulds(moulds: MouldSummary[]): RiskFinding[] {
+  return moulds
+    .filter((mould) => !mould.feasible)
+    .sort((a, b) => a.dayShortfall - b.dayShortfall)
+    .map((mould) => {
+      const short = Math.abs(mould.dayShortfall)
+      // Say what is left, and where the figure came from — a shortfall the
+      // reader cannot trace back to the sheet is a shortfall they will argue
+      // with rather than act on.
+      const basis =
+        mould.producedPieces === null
+          ? `${mould.remainingPieces} pcs outstanding (no completion recorded, so the full quantity is assumed)`
+          : `${mould.remainingPieces} pcs left of ${mould.totalQty} — ${mould.producedPieces} already produced`
+
+      return {
+        id: `infeasible-${mould.name}`,
+        level: 'critical' as RiskLevel,
+        category: 'capacity' as const,
+        title: mould.windowClosed
+          ? `${mould.name} has work outstanding past its window`
+          : `${mould.name} cannot finish in the time left`,
+        detail: mould.windowClosed
+          ? `${basis}, but ${formatWeek(mould.lastWeek!)} has already passed.`
+          : `${basis}. At ${PROCESS.piecesPerMouldPerDay} pc/mould/day that needs ${pluralise(mould.productionDaysRequired, 'working day')}, and only ${pluralise(mould.availableWorkingDays, 'working day')} remain before ${formatWeek(mould.lastWeek!)} ends. Short by ${pluralise(short, 'day')}.`,
+        refs: [mould.name],
+      }
+    })
 }
 
 /**
@@ -158,12 +202,55 @@ export function assembleFindings(input: {
   const findings = input.encodedMoulds?.length
     ? [...findEncodedMouldRisks(input.encodedMoulds), ...findCapacityConflicts(input.load)]
     : [
+        ...findInfeasibleMoulds(input.moulds),
         ...findCapacityConflicts(input.load),
         ...findLoadImbalance(input.load),
         ...findMouldRisks(input.moulds),
       ]
 
   return findings.sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level])
+}
+
+/**
+ * One line saying why a project carries the status it does.
+ *
+ * A badge reading "Action required" on all three projects tells a reader
+ * nothing about which to open first. This counts the findings by kind so the
+ * portfolio can say *what* is wrong, not merely *that* something is.
+ */
+export function summariseFindings(findings: RiskFinding[]): string {
+  const open = findings.filter((f) => f.level !== 'on-schedule')
+  if (open.length === 0) {
+    return findings.length > 0 ? 'All moulds within their window' : 'Nothing outstanding'
+  }
+
+  const infeasible = open.filter((f) => f.id.startsWith('infeasible-')).length
+  const overCapacity = open.filter(
+    (f) => f.category === 'capacity' && f.level === 'critical' && !f.id.startsWith('infeasible-'),
+  ).length
+  const tight = open.filter(
+    (f) => f.category === 'capacity' && f.level === 'limited-buffer',
+  ).length
+  const lateForms = open.filter((f) => f.id.startsWith('form-')).length
+  const readiness = open.filter(
+    (f) => f.category === 'mould-readiness' && !f.id.startsWith('form-'),
+  ).length
+
+  const parts: string[] = []
+  if (infeasible > 0) {
+    parts.push(`${infeasible} ${infeasible === 1 ? 'mould' : 'moulds'} cannot finish in window`)
+  }
+  if (lateForms > 0) parts.push(`${lateForms} forms late`)
+  if (overCapacity > 0) {
+    parts.push(`${overCapacity} ${overCapacity === 1 ? 'week' : 'weeks'} over capacity`)
+  }
+  if (readiness > 0) parts.push(`${readiness} mould readiness`)
+  if (parts.length === 0 && tight > 0) {
+    parts.push(`${tight} ${tight === 1 ? 'week' : 'weeks'} with no headroom`)
+  }
+
+  // Two clauses is the most a card can carry without wrapping badly.
+  return parts.slice(0, 2).join(' · ')
 }
 
 /** Highest severity present, for a project-level status badge. */

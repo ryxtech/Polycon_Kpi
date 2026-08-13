@@ -1,9 +1,4 @@
-import {
-  CAPACITY,
-  PROCESS,
-  RISK,
-  WEEKLY_FORM_DAY_CAPACITY,
-} from '@/config/process'
+import { CAPACITY, PIECES_PER_MOULD_PER_WEEK, PROCESS, RISK } from '@/config/process'
 import type {
   CallOffSummary,
   EncodedMould,
@@ -19,8 +14,10 @@ import {
   daysBetween,
   earliestWeek,
   latestWeek,
+  weekEndDate,
   weekSortKey,
   weekStartDate,
+  workingDaysBetween,
 } from './weeks'
 
 /**
@@ -162,16 +159,68 @@ export function summariseMoulds(
       }
     }
 
+    const totalQty = mouldRows.reduce((sum, row) => sum + row.qty, 0)
+
+    /*
+     * Marek's rule, applied to what is actually left:
+     *
+     *   "if 13 pcs are planned and 5 are already produced, then just 8 remain
+     *    … production follows 1 pc / 1 mould / 1 day"
+     *
+     * So QTY is the original 13, produced is the 5, and the schedule risk is
+     * 8 days of work against the working days still remaining in the window —
+     * measured from today, because elapsed days cannot be spent again. A
+     * window with 5 days left and 8 days of work is 3 days short, and that
+     * shortfall is the thing worth putting in front of a production manager.
+     */
+    const anyProduced = mouldRows.some((row) => row.produced !== null)
+    const producedPieces = anyProduced
+      ? mouldRows.reduce((sum, row) => sum + (row.produced ?? 0), 0)
+      : null
+    const remainingPieces = Math.max(totalQty - (producedPieces ?? 0), 0)
+
+    const productionDaysRequired = Math.ceil(
+      remainingPieces / PROCESS.piecesPerMouldPerDay,
+    )
+
+    // Count from today when production has already started, otherwise from the
+    // window's own opening — a future window has not begun losing days yet.
+    const windowStart = firstWeek ? weekStartDate(firstWeek) : null
+    const windowEnd = lastWeek ? weekEndDate(lastWeek) : null
+    const countFrom =
+      windowStart && referenceDate.getTime() > windowStart.getTime()
+        ? referenceDate
+        : windowStart
+
+    const availableWorkingDays =
+      countFrom && windowEnd ? workingDaysBetween(countFrom, windowEnd) : 0
+    const windowClosed = Boolean(
+      windowEnd && referenceDate.getTime() > windowEnd.getTime(),
+    )
+
+    const dayShortfall = availableWorkingDays - productionDaysRequired
+    const feasible =
+      remainingPieces === 0 || (!windowClosed && dayShortfall >= 0)
+
     summaries.push({
       name,
       itemCount: new Set(mouldRows.map((row) => row.item)).size,
       scheduledRows: mouldRows.length,
-      totalQty: mouldRows.reduce((sum, row) => sum + row.qty, 0),
+      totalQty,
       availability,
       firstWeek,
       lastWeek,
       bufferDays,
-      status: classifyBuffer(bufferDays),
+      producedPieces,
+      remainingPieces,
+      productionDaysRequired,
+      availableWorkingDays,
+      dayShortfall,
+      feasible,
+      windowClosed,
+      // A window that cannot hold the work is the more severe fact, so it
+      // outranks the mould-readiness buffer when the two disagree.
+      status: !feasible ? 'critical' : classifyBuffer(bufferDays),
       items: [...new Set(mouldRows.map((row) => row.item))].sort(),
     })
   }
@@ -248,8 +297,13 @@ export function computeWeeklyLoad(rows: ProductionRow[]): WeekLoad[] {
 
   return [...buckets.values()]
     .map((bucket) => {
-      const formDaysRequired = bucket.moulds.size * PROCESS.formProductionDays
-      const utilisation = formDaysRequired / WEEKLY_FORM_DAY_CAPACITY
+      /*
+       * A week's ceiling is set by how many moulds are running in it, not by
+       * the form-manufacturing limit: each active mould yields one piece per
+       * working day, so `moulds x 5` pieces is the most the week can deliver.
+       */
+      const pieceCapacity = bucket.moulds.size * PIECES_PER_MOULD_PER_WEEK
+      const utilisation = pieceCapacity === 0 ? 0 : bucket.pieces / pieceCapacity
 
       return {
         week: bucket.week,
@@ -258,7 +312,7 @@ export function computeWeeklyLoad(rows: ProductionRow[]): WeekLoad[] {
         pieces: bucket.pieces,
         mouldCount: bucket.moulds.size,
         moulds: [...bucket.moulds].sort(),
-        formDaysRequired,
+        pieceCapacity,
         utilisation,
         overCapacity: utilisation > 1,
         tightCapacity: utilisation >= CAPACITY.tightUtilisation && utilisation <= 1,

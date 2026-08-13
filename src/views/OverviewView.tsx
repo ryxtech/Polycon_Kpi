@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AttentionPanel } from '@/components/AttentionPanel'
 import { BulletChart, type BulletRow } from '@/components/BulletChart'
 import { CapacityChart } from '@/components/CapacityChart'
 import { Card } from '@/components/Card'
 import { Donut } from '@/components/Donut'
+import { FilterBar } from '@/components/FilterBar'
+import { HelpTip } from '@/components/HelpTip'
 import { KpiTile } from '@/components/KpiTile'
+import { ProgressBreakdown } from '@/components/ProgressBreakdown'
 import { StatusPill } from '@/components/StatusPill'
 import {
   IconAlert,
@@ -13,9 +16,15 @@ import {
   IconGauge,
   IconStack,
 } from '@/components/icons'
-import { COPY } from '@/config/copy'
+import { COPY, KPI_HELP } from '@/config/copy'
 import { PALETTE, READINESS_COLOR, STATUS_COLOR } from '@/config/theme'
-import type { ProjectAnalysis } from '@/hooks/useProjectAnalysis'
+import { analyseRows, type ProjectAnalysis } from '@/hooks/useProjectAnalysis'
+import {
+  applyCrossFilter,
+  filterBy,
+  sameFilter,
+  type CrossFilter,
+} from '@/lib/crossFilter'
 import { pluralise } from '@/lib/format'
 import { formatWeek, formatWeekLong } from '@/lib/weeks'
 import type { Project } from '@/types/domain'
@@ -32,10 +41,42 @@ interface OverviewViewProps {
  * answers "how big, and where are we", the wide visual answers "when", the
  * right column answers "is the tooling ready", and the bottom row answers
  * "what should I do about it".
+ *
+ * Every mark is also a filter. Clicking a week, mould or call-off recomputes
+ * the whole canvas against that selection — the source visual keeps all its
+ * marks and dims the unselected ones so the selection stays in context, while
+ * everything else filters outright.
  */
 export function OverviewView({ project, analysis }: OverviewViewProps) {
-  const { kpis, moulds, callOffs, load, findings, level } = analysis
-  const [week, setWeek] = useState<string | null>(null)
+  const [filter, setFilter] = useState<CrossFilter | null>(null)
+
+  // Escape clears — the convention a user already expects from a modal or a
+  // search field, and free to honour here.
+  useEffect(() => {
+    if (!filter) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFilter(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [filter])
+
+  // Selecting the same mark again clears it, so any click is reversible by
+  // repeating it rather than by hunting for the clear button.
+  const toggle = (next: CrossFilter) =>
+    setFilter((current) => (sameFilter(current, next) ? null : next))
+
+  const filteredRows = useMemo(
+    () => applyCrossFilter(project.rows, filter),
+    [project.rows, filter],
+  )
+
+  const view = useMemo(
+    () => (filter ? analyseRows(filteredRows, project) : analysis),
+    [filter, filteredRows, project, analysis],
+  )
+
+  const { kpis, moulds, callOffs, findings, level } = view
 
   // A workbook reports when a mould becomes available; a published form
   // schedule reports whether the form is on time. The labels must not blur them.
@@ -43,10 +84,11 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
   const openFindings = findings.filter((f) => f.level !== 'on-schedule').length
 
   const callOffRows: BulletRow[] = callOffs.map((callOff) => ({
+    id: String(callOff.callOff),
     label: `Call-off ${String(callOff.callOff).padStart(2, '0')}`,
     value: callOff.totalQty,
-    max: kpis.totalPieces,
-    display: `${callOff.totalQty} pcs`,
+    max: analysis.kpis.totalPieces,
+    display: pluralise(callOff.totalQty, 'pc'),
     note:
       callOff.firstWeek && callOff.lastWeek
         ? `${pluralise(callOff.itemCount, 'product')} · ${formatWeek(callOff.firstWeek)} → ${formatWeek(callOff.lastWeek)}`
@@ -59,10 +101,22 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
 
   return (
     <div className="space-y-4">
+      {filter && (
+        <FilterBar
+          filter={filter}
+          entries={filteredRows.length}
+          totalEntries={project.rows.length}
+          pieces={kpis.totalPieces}
+          totalPieces={analysis.kpis.totalPieces}
+          onClear={() => setFilter(null)}
+        />
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <KpiTile
           index={0}
           label="Overall production"
+          help={KPI_HELP.overallProduction}
           value={
             kpis.completionRatio === null
               ? '—'
@@ -76,6 +130,7 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
         <KpiTile
           index={1}
           label="Elements produced"
+          help={KPI_HELP.elementsProduced}
           value={kpis.producedPieces === null ? '—' : String(kpis.producedPieces)}
           unit={`/ ${kpis.totalPieces}`}
           caption={`${kpis.uniqueItems} distinct products`}
@@ -85,6 +140,7 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
         <KpiTile
           index={2}
           label={fromFormSchedule ? 'Forms on schedule' : 'Moulds ready'}
+          help={KPI_HELP.mouldsReady}
           value={String(kpis.mouldsReady)}
           unit={`/ ${kpis.mouldCount}`}
           ratio={kpis.mouldCount === 0 ? 0 : kpis.mouldsReady / kpis.mouldCount}
@@ -99,6 +155,7 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
         <KpiTile
           index={3}
           label="Next production"
+          help={KPI_HELP.nextProduction}
           value={kpis.nextProductionWeek ? formatWeek(kpis.nextProductionWeek) : '—'}
           icon={<IconCalendar size={17} />}
           caption={
@@ -110,6 +167,7 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
         <KpiTile
           index={4}
           label="Open findings"
+          help={KPI_HELP.openFindings}
           value={String(openFindings)}
           accent={openFindings > 0 ? STATUS_COLOR[level] : PALETTE.primary}
           icon={<IconAlert size={17} />}
@@ -126,27 +184,22 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
           index={5}
           title="Weekly production load"
           subtitle={
-            kpis.firstWeek && kpis.lastWeek
-              ? `${formatWeek(kpis.firstWeek)} → ${formatWeek(kpis.lastWeek)} · select a week to focus`
+            analysis.kpis.firstWeek && analysis.kpis.lastWeek
+              ? `${formatWeek(analysis.kpis.firstWeek)} → ${formatWeek(analysis.kpis.lastWeek)} · select a week to filter the report`
               : 'No schedule'
           }
-          actions={
-            <>
-              {week && (
-                <button
-                  type="button"
-                  onClick={() => setWeek(null)}
-                  className="chip cursor-pointer bg-(--color-surface-sunken) text-(--color-ink-muted) hover:text-(--color-ink)"
-                >
-                  Clear {week}
-                </button>
-              )}
-              <StatusPill level={level} />
-            </>
-          }
+          actions={<StatusPill level={level} />}
         >
-          {load.length > 0 ? (
-            <CapacityChart load={load} highlight={week} onSelectWeek={setWeek} />
+          {analysis.load.length > 0 ? (
+            <CapacityChart
+              load={analysis.load}
+              highlight={filter?.dimension === 'week' ? filter.value : null}
+              onSelectWeek={(selected) =>
+                selected === null
+                  ? setFilter(null)
+                  : toggle(filterBy.week(selected))
+              }
+            />
           ) : (
             <p className="text-sm text-(--color-ink-muted)">
               No element-level schedule for this project — see Production plan.
@@ -157,7 +210,7 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
         <Card
           index={6}
           title={fromFormSchedule ? 'Form readiness' : 'Mould readiness'}
-          subtitle="Current tooling status"
+          subtitle={filter ? 'Within the current selection' : 'Current tooling status'}
         >
           <div className="flex justify-center pt-1 pb-3">
             <Donut
@@ -200,26 +253,46 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
               ? 'Status as issued in the published form production schedule.'
               : tightest
                 ? `Tightest buffer: ${tightest.name}. Measured against the first week each mould's items are due.`
-                : 'No mould data.'}
+                : 'No mould data in this selection.'}
           </p>
         </Card>
       </div>
 
-      <div className="grid items-start gap-4 xl:grid-cols-2">
-        <AttentionPanel findings={findings} index={7} />
+      <div className="grid items-start gap-4 xl:grid-cols-3">
+        <Card
+          index={7}
+          title="Production progress"
+          subtitle={`${kpis.totalPieces} pieces planned`}
+          actions={
+            <HelpTip label="Production progress" {...KPI_HELP.productionProgress} />
+          }
+        >
+          <ProgressBreakdown
+            planned={kpis.totalPieces}
+            completed={kpis.producedPieces}
+          />
+        </Card>
+
+        <AttentionPanel findings={findings} index={8} />
 
         <Card
-          index={8}
+          index={9}
           title="Scope by call-off"
           subtitle={
             callOffs.length > 0
-              ? `${kpis.totalPieces} pieces across ${callOffs.length} call-offs`
+              ? `${kpis.totalPieces} pieces · select to filter`
               : 'Not used by this project'
           }
         >
           {callOffs.length > 0 ? (
             <>
-              <BulletChart rows={callOffRows} />
+              <BulletChart
+                rows={callOffRows}
+                selectedId={
+                  filter?.dimension === 'callOff' ? String(filter.value) : null
+                }
+                onSelect={(id) => toggle(filterBy.callOff(Number(id)))}
+              />
               <p className="mt-3.5 border-t border-(--color-gridline) pt-3 text-[11px] text-(--color-ink-faint)">
                 Bars show each call-off's share of scope, not completion.
               </p>

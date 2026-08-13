@@ -3,21 +3,35 @@ import { NoElementData } from '@/components/NoElementData'
 import { Card } from '@/components/Card'
 import { IconSearch } from '@/components/icons'
 import { COPY } from '@/config/copy'
+import { PRIORITY_BANDS } from '@/config/process'
+import { PRIORITY_COLOR } from '@/config/theme'
 import { formatAvailability } from '@/lib/format'
+import { priorityKey } from '@/lib/parseWorkbook'
 import { formatWeek, weekSortKey } from '@/lib/weeks'
 import type { Project } from '@/types/domain'
 
-interface ProjectDetailsViewProps {
+interface ScheduleViewProps {
   project: Project
 }
 
-type SortKey = 'item' | 'qty' | 'callOff' | 'mould' | 'week'
+type SortKey = 'item' | 'qty' | 'callOff' | 'mould' | 'week' | 'priority'
 
-/** Levels 4 and 5 — the full schedule and the rows it was derived from. */
-export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
+/**
+ * Level 4 — the detailed schedule.
+ *
+ * Individual products against their production weeks and delivery grouping.
+ * Deliberately separate from the raw-data view: this one is read by a
+ * production manager, that one exists to prove where a number came from.
+ */
+export function ScheduleView({ project }: ScheduleViewProps) {
   const [query, setQuery] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('item')
+  const [sortKey, setSortKey] = useState<SortKey>('week')
   const [ascending, setAscending] = useState(true)
+
+  const hasPriority = useMemo(
+    () => project.rows.some((row) => row.priority !== null),
+    [project.rows],
+  )
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -40,6 +54,8 @@ export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
           return ((a.callOff ?? 0) - (b.callOff ?? 0)) * direction
         case 'mould':
           return (a.mould ?? '').localeCompare(b.mould ?? '') * direction
+        case 'priority':
+          return ((a.priority ?? 99) - (b.priority ?? 99)) * direction
         case 'week': {
           const aw = a.weeks[0]
           const bw = b.weeks[0]
@@ -63,38 +79,32 @@ export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
   return (
     <div className="space-y-4">
       <header className="rise">
-        <h1 className="text-2xl font-bold tracking-tight">Detail</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Detailed schedule</h1>
         <p className="mt-0.5 text-sm text-(--color-ink-muted)">
-          Every row as parsed from the source, with the original week text kept
-          beside the interpreted weeks.
+          Individual products against their production weeks, mould and call-off.
         </p>
       </header>
 
       {project.rows.length === 0 ? (
-        <NoElementData project={project} what="The detailed row view" />
+        <NoElementData project={project} what="The detailed schedule" />
       ) : (
         <Card
-          title="Parsed rows"
-          subtitle={`${project.source} · ${COPY.dataCurrencyPrefix} ${project.dataAsOf}`}
+          title="Schedule"
+          subtitle={`${rows.length} of ${project.rows.length} entries`}
           actions={
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-(--color-ink-faint)" />
-                <label htmlFor="details-search" className="sr-only">
-                  Search items, moulds or weeks
-                </label>
-                <input
-                  id="details-search"
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search item, mould, week…"
-                  className="w-56 rounded-xl bg-(--color-surface-sunken) py-2 pr-3 pl-8 text-xs transition-shadow hover:shadow-[var(--shadow-rest)] focus:shadow-[var(--shadow-rest)]"
-                />
-              </div>
-              <span className="num text-[11px] whitespace-nowrap text-(--color-ink-faint)">
-                {rows.length}/{project.rows.length}
-              </span>
+            <div className="relative">
+              <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-(--color-ink-faint)" />
+              <label htmlFor="schedule-search" className="sr-only">
+                Search items, moulds or weeks
+              </label>
+              <input
+                id="schedule-search"
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search item, mould, week…"
+                className="min-h-11 w-full max-w-56 rounded-xl bg-(--color-surface-sunken) pr-3 pl-8 text-xs transition-shadow hover:shadow-[var(--shadow-rest)] focus:shadow-[var(--shadow-rest)]"
+              />
             </div>
           }
           flush
@@ -123,6 +133,14 @@ export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
                     ascending={ascending}
                     onClick={() => toggleSort('callOff')}
                   />
+                  {hasPriority && (
+                    <SortableTh
+                      label="Priority"
+                      active={sortKey === 'priority'}
+                      ascending={ascending}
+                      onClick={() => toggleSort('priority')}
+                    />
+                  )}
                   <SortableTh
                     label="Mould"
                     active={sortKey === 'mould'}
@@ -131,12 +149,11 @@ export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
                   />
                   <th scope="col">Mould available</th>
                   <SortableTh
-                    label="Weeks"
+                    label="Production weeks"
                     active={sortKey === 'week'}
                     ascending={ascending}
                     onClick={() => toggleSort('week')}
                   />
-                  <th scope="col">Source text</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,15 +164,31 @@ export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
                     <td className="num text-right text-(--color-ink-muted)">
                       {row.callOff ?? '—'}
                     </td>
+                    {hasPriority && (
+                      <td>
+                        {row.priority === null ? (
+                          <span className="text-(--color-ink-faint)">—</span>
+                        ) : (
+                          <span
+                            className="chip"
+                            style={{
+                              backgroundColor: `${PRIORITY_COLOR[priorityKey(row.priority)]}1A`,
+                              color: PRIORITY_COLOR[priorityKey(row.priority)],
+                            }}
+                          >
+                            {row.priority} ·{' '}
+                            {PRIORITY_BANDS.find((b) => (row.priority ?? 99) <= b.max)
+                              ?.label ?? 'Normal'}
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td className="text-(--color-ink-muted)">{row.mould ?? '—'}</td>
                     <td className="text-(--color-ink-muted)">
                       {formatAvailability(row.availability)}
                     </td>
                     <td className="num text-(--color-ink-muted)">
                       {row.weeks.length > 0 ? row.weeks.map(formatWeek).join(' ') : '—'}
-                    </td>
-                    <td className="num text-[11px] text-(--color-ink-faint)">
-                      {row.weeksRaw || '—'}
                     </td>
                   </tr>
                 ))}
@@ -170,6 +203,10 @@ export function ProjectDetailsView({ project }: ProjectDetailsViewProps) {
           </div>
         </Card>
       )}
+
+      <p className="text-[11px] text-(--color-ink-faint)">
+        Source: {project.source} · {COPY.dataCurrencyPrefix} {project.dataAsOf}
+      </p>
     </div>
   )
 }
@@ -196,7 +233,7 @@ function SortableTh({
       <button
         type="button"
         onClick={onClick}
-        className={`inline-flex cursor-pointer items-center gap-1 hover:text-(--color-primary) ${
+        className={`inline-flex min-h-11 cursor-pointer items-center gap-1 hover:text-(--color-primary) ${
           active ? 'text-(--color-primary)' : ''
         }`}
       >

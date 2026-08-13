@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { BEETHOVENSTRASSE, HIRSLANDENKLINIK, REFERENCE_DATE } from '@/data/projects'
+import {
+  BEETHOVENSTRASSE,
+  HIRSLANDENKLINIK,
+  REFERENCE_DATE,
+  SPECIMEN,
+} from '@/data/projects'
 import { PROCESS } from '@/config/process'
 import {
   classifyBuffer,
@@ -165,9 +170,59 @@ describe('summariseMoulds', () => {
     expect(byName.get('NHK3')?.bufferDays).toBe(10)
   })
 
-  it('finds no mould at risk on this dataset', () => {
-    // The reason the risk engine is capacity-based rather than date-based.
-    expect(moulds.every((m) => m.status === 'on-schedule')).toBe(true)
+  it('finds no mould at readiness risk on this dataset', () => {
+    // Every buffer is comfortable; the exposure is in production duration.
+    expect(moulds.every((m) => m.bufferDays === null || m.bufferDays > 7)).toBe(true)
+  })
+})
+
+/**
+ * Production duration, from Marek's rule: one piece per mould per working day.
+ * A quantity is therefore a duration, and a window either holds it or does not.
+ */
+describe('mould feasibility', () => {
+  const moulds = summariseMoulds(rows, REFERENCE_DATE)
+  const byName = new Map(moulds.map((m) => [m.name, m]))
+
+  it('turns the remaining quantity into working days one-for-one', () => {
+    expect(byName.get('NHK7')?.productionDaysRequired).toBe(104)
+    expect(byName.get('NHK4')?.productionDaysRequired).toBe(47)
+  })
+
+  it('assumes nothing produced when the source records no completion', () => {
+    // Worst case, and labelled as such wherever it is shown.
+    expect(byName.get('NHK4')?.producedPieces).toBeNull()
+    expect(byName.get('NHK4')?.remainingPieces).toBe(47)
+  })
+
+  it('counts the working days still remaining, not the window as planned', () => {
+    // NHK4 runs W35 to W43. The reference date precedes W35, so the whole
+    // nine-week window is still ahead: 45 working days.
+    expect(byName.get('NHK4')?.availableWorkingDays).toBe(45)
+    expect(byName.get('NHK4')?.windowClosed).toBe(false)
+  })
+
+  it('finds NHK4 infeasible by two working days', () => {
+    const nhk4 = byName.get('NHK4')
+    expect(nhk4?.feasible).toBe(false)
+    expect(nhk4?.dayShortfall).toBe(-2)
+  })
+
+  it('escalates an infeasible mould to critical regardless of its buffer', () => {
+    // NHK4 is READY TO SPRAY with a comfortable buffer; the window is the
+    // problem, and that is the more severe fact.
+    expect(byName.get('NHK4')?.status).toBe('critical')
+  })
+
+  it('leaves the other nine moulds feasible', () => {
+    expect(moulds.filter((m) => !m.feasible).map((m) => m.name)).toEqual(['NHK4'])
+  })
+
+  it('gives NHK7 the longest run but still inside its window', () => {
+    const nhk7 = byName.get('NHK7')
+    expect(nhk7?.productionDaysRequired).toBe(104)
+    expect(nhk7?.availableWorkingDays).toBe(115)
+    expect(nhk7?.feasible).toBe(true)
   })
 })
 
@@ -202,25 +257,34 @@ describe('computeWeeklyLoad', () => {
     expect(labels[labels.length - 1]).toBe('2027W4')
   })
 
-  it('measures capacity in form-days, not distinct moulds per week', () => {
-    // Four moulds in a week is not a breach of a three-per-day limit; they can
-    // run on different days. Only the form-day total can say whether it fits.
+  it("sets each week's ceiling from its active moulds, not a plant-wide limit", () => {
+    // Marek's rule: one piece per mould per working day. Four moulds running
+    // in a week can therefore yield 20 pieces, however many forms the plant
+    // can *manufacture* at once.
     const week36 = load.find((w) => w.week.week === 36)
     expect(week36?.mouldCount).toBe(4)
-    expect(week36?.formDaysRequired).toBe(4 * PROCESS.formProductionDays)
-    expect(week36?.overCapacity).toBe(false)
-    expect(week36?.tightCapacity).toBe(false)
+    expect(week36?.pieceCapacity).toBe(4 * PROCESS.workingDaysPerWeek)
   })
 
-  it('identifies weeks 37 and 43 as the tightest at 6 moulds', () => {
-    const tight = load.filter((week) => week.tightCapacity || week.overCapacity)
-    expect(tight.map((w) => w.week.week).sort((a, b) => a - b)).toEqual([37, 43])
-    expect(tight.every((w) => w.mouldCount === 6)).toBe(true)
-    expect(tight.every((w) => w.utilisation === 12 / 15)).toBe(true)
+  it('finds W36 planning more pieces than its four moulds can produce', () => {
+    const week36 = load.find((w) => w.week.week === 36)
+    expect(week36?.pieces).toBeCloseTo(23, 0)
+    expect(week36?.pieceCapacity).toBe(20)
+    expect(week36?.overCapacity).toBe(true)
   })
 
-  it('never exceeds capacity outright on this dataset', () => {
-    expect(load.some((week) => week.overCapacity)).toBe(false)
+  it('leaves W37 comfortable despite carrying the most moulds', () => {
+    // Six moulds yield 30 pcs, so 21 planned is well inside — the opposite of
+    // what a naive "most moulds = worst week" reading would conclude.
+    const week37 = load.find((w) => w.week.week === 37)
+    expect(week37?.mouldCount).toBe(6)
+    expect(week37?.pieceCapacity).toBe(30)
+    expect(week37?.overCapacity).toBe(false)
+  })
+
+  it('flags six weeks that cannot deliver what is planned into them', () => {
+    const over = load.filter((week) => week.overCapacity).map((w) => w.week.week)
+    expect(over.sort((a, b) => a - b)).toEqual([2, 36, 39, 47, 48, 51])
   })
 })
 
@@ -242,5 +306,53 @@ describe('classifyBuffer', () => {
 
   it('does not claim a mould is fine when its buffer is unknown', () => {
     expect(classifyBuffer(null)).toBe('limited-buffer')
+  })
+})
+
+/**
+ * Marek's worked example, end to end:
+ *
+ *   "if there are planned 13 pcs and 5 pcs are already produced, then remain
+ *    just 8 pcs … production follows 1 pc / 1 mould / 1 day"
+ *
+ * The schedule risk is therefore 8 days of work against the days still left,
+ * not 13 against the original window.
+ */
+describe("recording completion changes what the schedule risk is", () => {
+  const withProgress = summariseMoulds(SPECIMEN.rows, REFERENCE_DATE)
+  const byName = new Map(withProgress.map((m) => [m.name, m]))
+
+  it('subtracts produced pieces from the quantity to get the work left', () => {
+    const nhk4 = byName.get('NHK4')
+    expect(nhk4?.totalQty).toBe(47)
+    expect(nhk4?.producedPieces).toBe(22)
+    expect(nhk4?.remainingPieces).toBe(25)
+  })
+
+  it('needs one working day per remaining piece, not per planned piece', () => {
+    expect(byName.get('NHK4')?.productionDaysRequired).toBe(25)
+  })
+
+  it('clears NHK4 once its progress is known', () => {
+    // The identical schedule reads as a two-day breach without completion data
+    // and as twenty days of slack with it. This is the whole argument for
+    // adding the column.
+    const nhk4 = byName.get('NHK4')
+    expect(nhk4?.feasible).toBe(true)
+    expect(nhk4?.dayShortfall).toBe(20)
+  })
+
+  it('leaves every mould feasible once progress is recorded', () => {
+    expect(withProgress.filter((m) => !m.feasible)).toEqual([])
+  })
+
+  it('never reports negative work remaining', () => {
+    // An over-recorded produced figure must not produce a negative duration.
+    const over = summariseMoulds(
+      SPECIMEN.rows.map((row) => ({ ...row, produced: row.qty + 5 })),
+      REFERENCE_DATE,
+    )
+    expect(over.every((m) => m.remainingPieces === 0)).toBe(true)
+    expect(over.every((m) => m.feasible)).toBe(true)
   })
 })

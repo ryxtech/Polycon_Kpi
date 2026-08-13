@@ -2,9 +2,14 @@ import { useState } from 'react'
 import { AttentionPanel } from '@/components/AttentionPanel'
 import { StatusPill } from '@/components/StatusPill'
 import { COPY } from '@/config/copy'
-import { GRADIENT, READINESS_COLOR } from '@/config/theme'
+import {
+  GRADIENT,
+  READINESS_COLOR,
+  STATUS_TEXT,
+  STATUS_WASH,
+} from '@/config/theme'
 import type { ProjectAnalysis } from '@/hooks/useProjectAnalysis'
-import { formatAvailability, toWorkingDaysLabel } from '@/lib/format'
+import { formatAvailability } from '@/lib/format'
 import { formatWeek } from '@/lib/weeks'
 import type { Project } from '@/types/domain'
 
@@ -43,6 +48,7 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
     })
 
   const { kpis, moulds, callOffs, findings, level } = analysis
+  const infeasible = moulds.filter((mould) => !mould.feasible)
 
   return (
     <div className="space-y-4">
@@ -60,13 +66,13 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
             {SECTIONS.map((section) => (
               <label
                 key={section.id}
-                className="flex cursor-pointer items-center gap-2 text-sm"
+                className="flex min-h-11 cursor-pointer items-center gap-2 pr-1 text-sm"
               >
                 <input
                   type="checkbox"
                   checked={selected.has(section.id)}
                   onChange={() => toggle(section.id)}
-                  className="h-4 w-4 cursor-pointer accent-(--color-primary)"
+                  className="h-5 w-5 cursor-pointer accent-(--color-primary)"
                 />
                 {section.label}
               </label>
@@ -120,9 +126,35 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
               runs{' '}
               {kpis.firstWeek && kpis.lastWeek
                 ? `from ${formatWeek(kpis.firstWeek)} to ${formatWeek(kpis.lastWeek)}`
-                : 'to a schedule still being set'}
-              .
+                : 'to a schedule still being set'}{' '}
+              at one piece per mould per working day, so each outstanding piece
+              is <Strong>one working day</Strong> on its mould.
             </p>
+
+            {infeasible.length > 0 && (
+              <p
+                className="mt-3 rounded-2xl p-4 text-xs leading-relaxed"
+                style={{
+                  backgroundColor: STATUS_WASH.critical,
+                  color: STATUS_TEXT.critical,
+                }}
+              >
+                <Strong>
+                  {infeasible.length === 1
+                    ? '1 mould cannot finish inside its planned window.'
+                    : `${infeasible.length} moulds cannot finish inside their planned windows.`}
+                </Strong>{' '}
+                {infeasible
+                  .map(
+                    (mould) =>
+                      `${mould.name} has ${mould.remainingPieces} pcs outstanding, needing ${mould.productionDaysRequired} working days against ${mould.availableWorkingDays} remaining`,
+                  )
+                  .join('; ')}
+                .{' '}
+                {infeasible.some((m) => m.producedPieces === null) &&
+                  'Completion is not recorded in this source, so the full quantity is assumed outstanding.'}
+              </p>
+            )}
             <p className="mt-3 rounded-2xl bg-(--color-surface-alt) p-4 text-xs leading-relaxed text-(--color-ink-muted)">
               <Strong>Completion figures are not included.</Strong>{' '}
               {COPY.completionPending}
@@ -147,7 +179,8 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
             </div>
 
             {callOffs.length > 0 && (
-              <table className="data-grid mt-4">
+              <div className="mt-4 overflow-x-auto">
+                <table className="data-grid">
                 <thead>
                   <tr>
                     <th scope="col">Call-off</th>
@@ -173,6 +206,7 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </Section>
         )}
@@ -186,14 +220,17 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
                 label={`${kpis.mouldsPending} pending`}
               />
             </div>
-            <table className="data-grid">
+            <div className="overflow-x-auto">
+              <table className="data-grid">
               <thead>
                 <tr>
                   <th scope="col">Mould</th>
                   <th scope="col" className="text-right">Products</th>
                   <th scope="col" className="text-right">Pieces</th>
                   <th scope="col">Available</th>
-                  <th scope="col" className="text-right">Buffer</th>
+                  <th scope="col" className="text-right">Remaining</th>
+                  <th scope="col" className="text-right">Days needed</th>
+                  <th scope="col" className="text-right">Days left</th>
                   <th scope="col">Status</th>
                 </tr>
               </thead>
@@ -206,10 +243,21 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
                     <td className="text-(--color-ink-muted)">
                       {formatAvailability(mould.availability)}
                     </td>
-                    <td className="num text-right text-(--color-ink-muted)">
-                      {mould.bufferDays === null
-                        ? '—'
-                        : toWorkingDaysLabel(mould.bufferDays)}
+                    <td className="num text-right font-semibold">
+                      {mould.remainingPieces}
+                    </td>
+                    <td className="num text-right">
+                      {mould.productionDaysRequired}
+                    </td>
+                    <td
+                      className="num text-right"
+                      style={{
+                        color: mould.feasible ? undefined : STATUS_TEXT.critical,
+                        fontWeight: mould.feasible ? undefined : 600,
+                      }}
+                    >
+                      {mould.availableWorkingDays}
+                      {!mould.feasible && ` (−${Math.abs(mould.dayShortfall)})`}
                     </td>
                     <td>
                       <StatusPill level={mould.status} />
@@ -218,12 +266,14 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
                 ))}
               </tbody>
             </table>
+            </div>
           </Section>
         )}
 
         {selected.has('schedule') && (
           <Section title="Production schedule">
-            <table className="data-grid">
+            <div className="overflow-x-auto">
+              <table className="data-grid">
               <thead>
                 <tr>
                   <th scope="col">Week</th>
@@ -239,14 +289,25 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
                     <td className="num text-right">{Math.round(week.pieces)}</td>
                     <td className="num text-right">{week.mouldCount}</td>
                     <td className="num text-right text-(--color-ink-muted)">
+                      {week.pieceCapacity}
+                    </td>
+                    <td
+                      className="num text-right"
+                      style={{
+                        color: week.overCapacity ? STATUS_TEXT.critical : undefined,
+                        fontWeight: week.overCapacity ? 600 : undefined,
+                      }}
+                    >
                       {Math.round(week.utilisation * 100)}%
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 text-[11px] text-(--color-ink-faint)">
-              {COPY.spreadCaveat}
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-(--color-ink-faint)">
+              Capacity is the active moulds for that week at one piece per mould
+              per working day. {COPY.spreadCaveat}
             </p>
           </Section>
         )}

@@ -107,6 +107,33 @@ export function daysBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY)
 }
 
+/**
+ * Working days from `from` up to and including `to`, Monday–Friday.
+ *
+ * Used to measure the time a mould *actually has left*, not the size of its
+ * original window: days already elapsed cannot be spent again, so a window
+ * that looked comfortable in August may be short by October.
+ */
+export function workingDaysBetween(from: Date, to: Date): number {
+  if (to.getTime() < from.getTime()) return 0
+
+  let count = 0
+  const cursor = new Date(
+    Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()),
+  )
+  const end = to.getTime()
+  let guard = 0
+
+  while (cursor.getTime() <= end && guard < 4000) {
+    const day = cursor.getUTCDay()
+    if (day !== 0 && day !== 6) count += 1
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+    guard += 1
+  }
+
+  return count
+}
+
 export function formatWeek(ref: WeekRef): string {
   return `W${ref.week}`
 }

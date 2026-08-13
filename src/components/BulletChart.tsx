@@ -3,6 +3,8 @@ import { prefersReducedMotion } from '@/lib/motion'
 import type { RiskLevel } from '@/types/domain'
 
 export interface BulletRow {
+  /** Stable key used for selection; falls back to the label. */
+  id?: string
   label: string
   /** Measured value, in the same unit as `max`. */
   value: number
@@ -20,6 +22,10 @@ interface BulletChartProps {
   rows: BulletRow[]
   /** Label shown against the target marker in the legend. */
   targetLabel?: string
+  /** Makes each row a mark that cross-filters the canvas. */
+  onSelect?: (id: string) => void
+  /** Currently selected row id; others dim rather than disappear. */
+  selectedId?: string | null
 }
 
 /**
@@ -29,7 +35,12 @@ interface BulletChartProps {
  * show at once and gauges do not tile. Every value is printed as text beside its
  * bar, so the chart stays readable without relying on length or colour.
  */
-export function BulletChart({ rows, targetLabel = 'Target' }: BulletChartProps) {
+export function BulletChart({
+  rows,
+  targetLabel = 'Target',
+  onSelect,
+  selectedId = null,
+}: BulletChartProps) {
   if (rows.length === 0) {
     return <p className="text-sm text-(--color-ink-muted)">No measures to show.</p>
   }
@@ -47,8 +58,11 @@ export function BulletChart({ rows, targetLabel = 'Target' }: BulletChartProps) 
               ? Math.min(row.target / row.max, 1)
               : null
 
-          return (
-            <li key={row.label}>
+          const id = row.id ?? row.label
+          const dimmed = selectedId !== null && selectedId !== id
+
+          const body = (
+            <>
               <div className="flex items-baseline justify-between gap-3">
                 <span className="truncate text-[13px] font-medium text-(--color-ink)">
                   {row.label}
@@ -87,6 +101,23 @@ export function BulletChart({ rows, targetLabel = 'Target' }: BulletChartProps) 
 
               {row.note && (
                 <p className="mt-1 text-[11px] text-(--color-ink-faint)">{row.note}</p>
+              )}
+            </>
+          )
+
+          return (
+            <li key={id} style={{ opacity: dimmed ? 0.4 : 1 }}>
+              {onSelect ? (
+                <button
+                  type="button"
+                  onClick={() => onSelect(id)}
+                  aria-pressed={selectedId === id}
+                  className="w-full cursor-pointer rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-(--color-surface-alt)"
+                >
+                  {body}
+                </button>
+              ) : (
+                body
               )}
             </li>
           )

@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { MouldDrawer } from '@/components/MouldDrawer'
+import { HelpTip } from '@/components/HelpTip'
 import { StatusPill } from '@/components/StatusPill'
 import { Card } from '@/components/Card'
 import { BulletChart, type BulletRow } from '@/components/BulletChart'
 import { IconChevronRight } from '@/components/icons'
+import { KPI_HELP } from '@/config/copy'
 import { STATUS_TEXT } from '@/config/theme'
 import type { ProjectAnalysis } from '@/hooks/useProjectAnalysis'
-import { formatAvailability, pluralise, toWorkingDaysLabel } from '@/lib/format'
+import { formatAvailability, pluralise } from '@/lib/format'
 import { formatWeek } from '@/lib/weeks'
 import type { EncodedMould, MouldSummary, Project } from '@/types/domain'
 
@@ -30,7 +32,7 @@ export function MouldReadinessView({ project, analysis }: MouldReadinessViewProp
       label: form.name,
       value: form.totalQty,
       max: Math.max(...(encoded ?? []).map((f) => f.totalQty), 1),
-      display: `${form.totalQty} pcs`,
+      display: pluralise(form.totalQty, 'pc'),
       level: form.status,
       note: pluralise(form.productCount, 'product'),
     }))
@@ -41,7 +43,7 @@ export function MouldReadinessView({ project, analysis }: MouldReadinessViewProp
       label: mould.name,
       value: mould.totalQty,
       max: Math.max(...moulds.map((m) => m.totalQty), 1),
-      display: `${mould.totalQty} pcs`,
+      display: pluralise(mould.totalQty, 'pc'),
       level: mould.status,
       note: `${pluralise(mould.itemCount, 'product')} · ${
         mould.firstWeek && mould.lastWeek
@@ -73,7 +75,8 @@ export function MouldReadinessView({ project, analysis }: MouldReadinessViewProp
         <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
           <Card
             title="Mould schedule"
-            subtitle="Buffer is calculated, not transcribed — select a row for detail"
+            subtitle="Days needed = pieces still to make, at 1 pc/mould/day"
+            actions={<HelpTip label="Days needed" {...KPI_HELP.daysNeeded} />}
             flush
           >
             <div className="overflow-x-auto">
@@ -86,7 +89,34 @@ export function MouldReadinessView({ project, analysis }: MouldReadinessViewProp
                     <th scope="col" className="text-right">Pieces</th>
                     <th scope="col">Available</th>
                     <th scope="col">Window</th>
-                    <th scope="col" className="text-right">Buffer</th>
+                    <th
+                      scope="col"
+                      className="text-right"
+                      title="Pieces already produced, from the source"
+                    >
+                      Made
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-right"
+                      title="Pieces still to make: ordered less produced"
+                    >
+                      Left
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-right"
+                      title="One working day per remaining piece"
+                    >
+                      Days needed
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-right"
+                      title="Working days remaining before this mould's window closes"
+                    >
+                      Days left
+                    </th>
                     <th scope="col">Status</th>
                     <th scope="col" aria-label="Open detail" />
                   </tr>
@@ -112,18 +142,47 @@ export function MouldReadinessView({ project, analysis }: MouldReadinessViewProp
                         {mould.scheduledRows}
                       </td>
                       <td className="num text-right">{mould.totalQty}</td>
-                      <td className="text-(--color-ink-muted)">
+                      <td className="whitespace-nowrap text-(--color-ink-muted)">
                         {formatAvailability(mould.availability)}
                       </td>
-                      <td className="num text-(--color-ink-muted)">
+                      <td className="num whitespace-nowrap text-(--color-ink-muted)">
                         {mould.firstWeek && mould.lastWeek
                           ? `${formatWeek(mould.firstWeek)} → ${formatWeek(mould.lastWeek)}`
                           : '—'}
                       </td>
-                      <td className="num text-right text-(--color-ink-muted)">
-                        {mould.bufferDays === null
-                          ? '—'
-                          : toWorkingDaysLabel(mould.bufferDays)}
+                      <td
+                        className="num text-right"
+                        style={{ color: 'var(--color-ink-faint)' }}
+                        title={
+                          mould.producedPieces === null
+                            ? 'No completion recorded in the source'
+                            : undefined
+                        }
+                      >
+                        {mould.producedPieces ?? '—'}
+                      </td>
+                      <td className="num text-right font-semibold">
+                        {mould.remainingPieces}
+                      </td>
+                      <td className="num text-right">
+                        {mould.productionDaysRequired}
+                      </td>
+                      <td
+                        className="num text-right"
+                        style={{
+                          color: mould.feasible
+                            ? 'var(--color-ink-muted)'
+                            : STATUS_TEXT.critical,
+                          fontWeight: mould.feasible ? undefined : 600,
+                        }}
+                        title={
+                          mould.feasible
+                            ? `${mould.dayShortfall} days of slack`
+                            : `Short by ${Math.abs(mould.dayShortfall)} working days`
+                        }
+                      >
+                        {mould.availableWorkingDays}
+                        {!mould.feasible && ` (−${Math.abs(mould.dayShortfall)})`}
                       </td>
                       <td>
                         <StatusPill level={mould.status} />

@@ -6,9 +6,10 @@ import {
   summariseCallOffs,
   summariseMoulds,
 } from '@/lib/derive'
-import { assembleFindings, overallLevel } from '@/lib/risk'
+import { assembleFindings, overallLevel, summariseFindings } from '@/lib/risk'
 import type {
   CallOffSummary,
+  ProductionRow,
   MouldSummary,
   Project,
   ProjectKpis,
@@ -24,6 +25,8 @@ export interface ProjectAnalysis {
   load: WeekLoad[]
   findings: RiskFinding[]
   level: RiskLevel
+  /** One line saying why the project carries that level. */
+  reason: string
 }
 
 /**
@@ -37,15 +40,37 @@ export function useProjectAnalysis(project: Project): ProjectAnalysis {
 }
 
 export function analyseProject(project: Project): ProjectAnalysis {
-  const kpis = computeKpis(project.rows, REFERENCE_DATE, project.encodedMoulds)
-  const moulds = summariseMoulds(project.rows, REFERENCE_DATE)
-  const callOffs = summariseCallOffs(project.rows)
-  const load = computeWeeklyLoad(project.rows)
+  return analyseRows(project.rows, project)
+}
+
+/**
+ * Analyse an arbitrary subset of a project's rows.
+ *
+ * Cross-filtering runs the selected rows through this same function, so a
+ * filtered figure is produced by exactly the pipeline that produced the
+ * headline it came from — the two can never quietly disagree.
+ */
+export function analyseRows(
+  rows: ProductionRow[],
+  project: Project,
+): ProjectAnalysis {
+  const kpis = computeKpis(rows, REFERENCE_DATE, project.encodedMoulds)
+  const moulds = summariseMoulds(rows, REFERENCE_DATE)
+  const callOffs = summariseCallOffs(rows)
+  const load = computeWeeklyLoad(rows)
   const findings = assembleFindings({
     load,
     moulds,
     encodedMoulds: project.encodedMoulds,
   })
 
-  return { kpis, moulds, callOffs, load, findings, level: overallLevel(findings) }
+  return {
+    kpis,
+    moulds,
+    callOffs,
+    load,
+    findings,
+    level: overallLevel(findings),
+    reason: summariseFindings(findings),
+  }
 }

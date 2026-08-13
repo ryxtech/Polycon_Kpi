@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { PALETTE } from '@/config/theme'
+import { HelpTip } from './HelpTip'
 import { stagger } from '@/lib/motion'
 
 interface KpiTileProps {
@@ -20,6 +21,12 @@ interface KpiTileProps {
   pending?: boolean
   pendingNote?: string
   index?: number
+  /** One-line explanation plus source columns, shown behind a "?". */
+  help?: {
+    what: string
+    columns: readonly string[]
+    missing?: boolean
+  }
 }
 
 /**
@@ -40,6 +47,7 @@ export function KpiTile({
   pending = false,
   pendingNote,
   index,
+  help,
 }: KpiTileProps) {
   return (
     <div
@@ -48,7 +56,10 @@ export function KpiTile({
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <p className="field truncate">{label}</p>
+          <p className="field flex items-center gap-1.5">
+            <span className="truncate">{label}</span>
+            {help && <HelpTip label={label} {...help} />}
+          </p>
 
           <p className="mt-2 flex items-baseline gap-1.5">
             <span

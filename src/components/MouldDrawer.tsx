@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { GRADIENT, STATUS_COLOR } from '@/config/theme'
+import {
+  GRADIENT,
+  STATUS_COLOR,
+  STATUS_TEXT,
+  STATUS_WASH,
+} from '@/config/theme'
 import { formatAvailability, toWorkingDaysLabel } from '@/lib/format'
 import { formatWeek, formatWeekLong } from '@/lib/weeks'
 import type { MouldSummary } from '@/types/domain'
@@ -71,12 +76,47 @@ export function MouldDrawer({ mould, onClose }: MouldDrawerProps) {
             <Figure label="Products" value={String(mould.itemCount)} mono />
             <Figure label="Entries" value={String(mould.scheduledRows)} mono />
             <Figure label="Available" value={formatAvailability(mould.availability)} />
+            <Figure
+              label="Produced"
+              value={mould.producedPieces === null ? '—' : String(mould.producedPieces)}
+              mono
+            />
+            <Figure label="Remaining" value={String(mould.remainingPieces)} mono />
+            <Figure
+              label="Days needed"
+              value={String(mould.productionDaysRequired)}
+              mono
+            />
+            <Figure
+              label="Days left"
+              value={String(mould.availableWorkingDays)}
+              mono
+            />
           </div>
+
+          {!mould.feasible && (
+            <p
+              className="rounded-xl px-3 py-2.5 text-xs leading-relaxed"
+              style={{
+                backgroundColor: STATUS_WASH.critical,
+                color: STATUS_TEXT.critical,
+              }}
+            >
+              <strong>Cannot finish in the time left.</strong>{' '}
+              {mould.remainingPieces} pcs still to make needs{' '}
+              {mould.productionDaysRequired} working days at one piece per mould
+              per day, but only {mould.availableWorkingDays} remain. Short by{' '}
+              {Math.abs(mould.dayShortfall)} working days.
+            </p>
+          )}
 
           <section>
             <h3 className="field mb-1.5">Status</h3>
             <StatusPill level={mould.status} size="md" />
             <p className="mt-1.5 text-xs leading-relaxed text-(--color-ink-muted)">
+              {mould.producedPieces === null
+                ? 'The source records no completion, so the full quantity is assumed outstanding. '
+                : `${mould.producedPieces} of ${mould.totalQty} produced. `}
               {mould.bufferDays === null
                 ? 'No readiness date recorded, so the buffer cannot be calculated.'
                 : `${toWorkingDaysLabel(mould.bufferDays)} between this mould becoming available and the start of its first production week.`}

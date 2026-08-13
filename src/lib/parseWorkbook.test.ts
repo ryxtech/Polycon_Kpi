@@ -4,6 +4,7 @@ import {
   normaliseMouldName,
   normaliseRows,
   parseAvailability,
+  priorityKey,
   type RawRow,
 } from './parseWorkbook'
 
@@ -133,5 +134,73 @@ describe('normaliseRows', () => {
     const rows = normaliseRows(wrapping, 2026)
     const weekTwo = rows[1].weeks.find((w) => w.week === 2)
     expect(weekTwo?.year).toBe(2027)
+  })
+})
+
+describe('priorityKey', () => {
+  it('bands 1 as critical', () => {
+    expect(priorityKey(1)).toBe('critical')
+  })
+
+  it('bands 2 and 3 as high', () => {
+    expect(priorityKey(2)).toBe('high')
+    expect(priorityKey(3)).toBe('high')
+  })
+
+  it('bands 4 and beyond as normal', () => {
+    expect(priorityKey(4)).toBe('normal')
+    expect(priorityKey(5)).toBe('normal')
+    expect(priorityKey(12)).toBe('normal')
+  })
+
+  it('reports an absent priority as none, not as least urgent', () => {
+    // "We do not know" and "not urgent" are different claims; folding the
+    // first into the second would invent a fact about the schedule.
+    expect(priorityKey(null)).toBe('none')
+  })
+})
+
+describe('priority parsing', () => {
+  const base: RawRow[] = [
+    ['SL-300 FP 31', 8, 2, 'NHK7', 'READY TO SPRAY', '37'],
+  ]
+
+  it('leaves priority null when the source has no such column', () => {
+    expect(normaliseRows(base, 2026)[0].priority).toBeNull()
+  })
+
+  it('reads a numeric priority', () => {
+    const withPriority: RawRow[] = [
+      ['A', 1, 1, 'NHK1', 'READY TO SPRAY', '37', null, 2],
+    ]
+    expect(normaliseRows(withPriority, 2026)[0].priority).toBe(2)
+  })
+
+  it('reads a priority written as text', () => {
+    const written: RawRow[] = [
+      ['A', 1, 1, 'NHK1', 'READY TO SPRAY', '37', null, 'Priority 4'],
+    ]
+    expect(normaliseRows(written, 2026)[0].priority).toBe(4)
+  })
+
+  it.each([null, '', '—', 'n/a', 0, '0'])(
+    'treats %o as no priority rather than as zero',
+    (value) => {
+      const row: RawRow[] = [
+        ['A', 1, 1, 'NHK1', 'READY TO SPRAY', '37', null, value as string | number | null],
+      ]
+      expect(normaliseRows(row, 2026)[0].priority).toBeNull()
+    },
+  )
+})
+
+describe('the Hirslandenklinik workbook', () => {
+  it('carries no priority column, so the filter must degrade rather than lie', () => {
+    // Recorded so that a future source gaining the column is a visible change.
+    const rows = normaliseRows(
+      [['SL-300 BP 01', 3, 1, 'NHK10', '2026-08-13', '37']],
+      2026,
+    )
+    expect(rows.every((row) => row.priority === null)).toBe(true)
   })
 })

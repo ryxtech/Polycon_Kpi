@@ -36,7 +36,14 @@ export interface ProductionRow {
    * is the case today, and why progress renders as a placeholder.
    */
   produced: number | null
+  /**
+   * Production priority, 1 being most urgent. Null when the source carries no
+   * priority column, which is the case for the Hirslandenklinik workbook.
+   */
+  priority: number | null
 }
+
+export type PriorityKey = 'critical' | 'high' | 'normal' | 'none'
 
 /** Per-mould rollup across all rows using that mould. */
 export interface MouldSummary {
@@ -58,6 +65,31 @@ export interface MouldSummary {
   lastWeek: WeekRef | null
   /** Calendar days between availability and the first production week start. */
   bufferDays: number | null
+  /**
+   * Pieces already produced. Null when the source records no completion, in
+   * which case the schedule is assessed on the full quantity as a worst case
+   * and every surface says so.
+   */
+  producedPieces: number | null
+  /** Still to make: `totalQty - producedPieces`, or the full quantity if unknown. */
+  remainingPieces: number
+  /**
+   * Working days the remaining pieces need, at one piece per mould per day.
+   * Marek's rule: 13 planned less 5 produced leaves 8, and 8 pieces is 8 days.
+   */
+  productionDaysRequired: number
+  /**
+   * Working days still available — measured from today, not from the start of
+   * the window. Elapsed days cannot be spent again, which is precisely how a
+   * window that looked comfortable becomes short.
+   */
+  availableWorkingDays: number
+  /** Negative when the time left cannot hold the work left. */
+  dayShortfall: number
+  /** False when the remaining pieces cannot be produced in the time remaining. */
+  feasible: boolean
+  /** True when the window has already closed. */
+  windowClosed: boolean
   status: RiskLevel
   items: string[]
 }
@@ -80,9 +112,12 @@ export interface WeekLoad {
   /** Distinct moulds required in this week. */
   mouldCount: number
   moulds: string[]
-  /** Form-days demanded: moulds x production duration. */
-  formDaysRequired: number
-  /** Share of the week's form-day capacity consumed. */
+  /**
+   * Pieces this week's active moulds can yield, at one piece per mould per
+   * working day.
+   */
+  pieceCapacity: number
+  /** Share of that capacity the week's demand consumes. */
   utilisation: number
   /** Demand exceeds the week's capacity outright. */
   overCapacity: boolean
@@ -140,6 +175,15 @@ export interface Project {
    * no workbook to derive them from.
    */
   encodedMoulds?: EncodedMould[]
+  /**
+   * Marks a demonstration dataset rather than a real job.
+   *
+   * Carried on the project itself so every surface that renders a project can
+   * label it, rather than relying on each view to remember.
+   */
+  specimen?: boolean
+  /** Shown beside the specimen badge to say what it is for. */
+  specimenNote?: string
 }
 
 /**

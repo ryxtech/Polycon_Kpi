@@ -9,9 +9,16 @@ import {
   IconStack,
 } from '@/components/icons'
 import { COPY } from '@/config/copy'
-import { GRADIENT, PALETTE, STATUS_COLOR, STATUS_TEXT } from '@/config/theme'
+import {
+  GRADIENT,
+  PALETTE,
+  STATUS_COLOR,
+  STATUS_TEXT,
+  STATUS_WASH,
+} from '@/config/theme'
 import { PROJECTS } from '@/data/projects'
 import { analyseProject } from '@/hooks/useProjectAnalysis'
+import { assessDataQuality } from '@/lib/dataQuality'
 import { stagger } from '@/lib/motion'
 import { formatWeek } from '@/lib/weeks'
 import type { Project } from '@/types/domain'
@@ -30,12 +37,25 @@ export function PortfolioView({ onOpen }: PortfolioViewProps) {
   const entries = PROJECTS.map((project) => ({
     project,
     analysis: analyseProject(project),
+    quality: assessDataQuality(project),
   }))
 
-  const totalPieces = entries.reduce((sum, e) => sum + e.analysis.kpis.totalPieces, 0)
-  const totalItems = entries.reduce((sum, e) => sum + e.analysis.kpis.uniqueItems, 0)
-  const totalMoulds = entries.reduce((sum, e) => sum + e.analysis.kpis.mouldCount, 0)
-  const atRisk = entries.filter((e) => e.analysis.level !== 'on-schedule').length
+  /*
+   * The specimen is separated rather than mixed in.
+   *
+   * It shares Hirslandenklinik's structure, so side by side the two read as
+   * duplicates of one another — and a demonstration dataset sitting in a list
+   * of live jobs is exactly the thing that gets screenshotted out of context.
+   */
+  const live = entries.filter((entry) => !entry.project.specimen)
+  const specimens = entries.filter((entry) => entry.project.specimen)
+
+  // Totals count live work only; folding a specimen into them would overstate
+  // the book by a whole project.
+  const totalPieces = live.reduce((sum, e) => sum + e.analysis.kpis.totalPieces, 0)
+  const totalItems = live.reduce((sum, e) => sum + e.analysis.kpis.uniqueItems, 0)
+  const totalMoulds = live.reduce((sum, e) => sum + e.analysis.kpis.mouldCount, 0)
+  const atRisk = live.filter((e) => e.analysis.level !== 'on-schedule').length
 
   return (
     <div className="space-y-5">
@@ -50,8 +70,8 @@ export function PortfolioView({ onOpen }: PortfolioViewProps) {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile
           index={0}
-          label="Projects"
-          value={String(entries.length)}
+          label="Active projects"
+          value={String(live.length)}
           icon={<IconGrid size={17} />}
         />
         <KpiTile
@@ -76,98 +96,184 @@ export function PortfolioView({ onOpen }: PortfolioViewProps) {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {entries.map(({ project, analysis }, index) => {
-          const open = analysis.findings.filter(
-            (f) => f.level !== 'on-schedule',
-          ).length
-          const readyRatio =
-            analysis.kpis.mouldCount === 0
-              ? 0
-              : analysis.kpis.mouldsReady / analysis.kpis.mouldCount
+      <section>
+        <h2 className="field mb-2.5">Active projects</h2>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {live.map((entry, index) => (
+            <ProjectCard key={entry.project.id} {...entry} index={index + 4} onOpen={onOpen} />
+          ))}
+        </div>
+      </section>
 
-          return (
-            <button
-              key={project.id}
-              type="button"
-              onClick={() => onOpen(project)}
-              className="card card-interactive rise p-5 text-left"
-              style={stagger(index + 4)}
-            >
-              <div className="flex items-start gap-3">
-                <span
-                  aria-hidden="true"
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-base font-bold text-white"
-                  style={{ background: GRADIENT.brand }}
-                >
-                  {project.name.slice(0, 2).toUpperCase()}
-                </span>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-base font-bold tracking-tight">
-                      {project.name}
-                    </h2>
-                    <StatusPill level={analysis.level} />
-                  </div>
-                  <p className="mt-0.5 text-xs text-(--color-ink-faint)">
-                    {project.client} · {COPY.dataCurrencyPrefix} {project.dataAsOf}
-                  </p>
-                </div>
-
-                <IconChevronRight className="mt-1 shrink-0 text-(--color-ink-faint)" />
-              </div>
-
-              <dl className="mt-4 grid grid-cols-4 gap-3">
-                <Metric label="Pieces" value={String(analysis.kpis.totalPieces)} />
-                <Metric label="Products" value={String(analysis.kpis.uniqueItems)} />
-                <Metric
-                  label="Next week"
-                  value={
-                    analysis.kpis.nextProductionWeek
-                      ? formatWeek(analysis.kpis.nextProductionWeek)
-                      : '—'
-                  }
-                />
-                <Metric
-                  label="Open"
-                  value={String(open)}
-                  color={open > 0 ? STATUS_TEXT[analysis.level] : undefined}
-                />
-              </dl>
-
-              <div className="mt-4">
-                <div className="flex items-baseline justify-between text-[11px]">
-                  <span className="text-(--color-ink-faint)">Moulds ready</span>
-                  <span className="num font-semibold">
-                    {analysis.kpis.mouldsReady}/{analysis.kpis.mouldCount}
-                  </span>
-                </div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-(--color-surface-sunken)">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${readyRatio * 100}%`,
-                      backgroundColor: STATUS_COLOR['on-schedule'],
-                    }}
-                  />
-                </div>
-              </div>
-
-              <p className="mt-3 truncate text-[10px] text-(--color-ink-faint)">
-                {project.source}
-              </p>
-            </button>
-          )
-        })}
-      </div>
+      {specimens.length > 0 && (
+        <section>
+          <h2 className="field mb-2.5">Reference — what complete data looks like</h2>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {specimens.map((entry, index) => (
+              <ProjectCard
+                key={entry.project.id}
+                {...entry}
+                index={index + 6}
+                onOpen={onOpen}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <Card index={6} className="bg-transparent shadow-none">
         <p className="text-xs leading-relaxed text-(--color-ink-faint)">
-          Progress percentages are absent by design — neither source carries a
-          completed-quantity field. {COPY.completionPending}
+          {/* Conditional: the specimen does carry completion, so the blanket
+              claim would be wrong the moment it is on screen. */}
+          Progress percentages are absent from the real projects by design —
+          neither source carries a completed-quantity field.{' '}
+          {COPY.completionPending} Open the specimen to see the same dashboard
+          once it does.
         </p>
       </Card>
+    </div>
+  )
+}
+
+interface ProjectCardProps {
+  project: Project
+  analysis: ReturnType<typeof analyseProject>
+  quality: ReturnType<typeof assessDataQuality>
+  index: number
+  onOpen: (project: Project) => void
+}
+
+function ProjectCard({
+  project,
+  analysis,
+  quality,
+  index,
+  onOpen,
+}: ProjectCardProps) {
+  const open = analysis.findings.filter((f) => f.level !== 'on-schedule').length
+  const readyRatio =
+    analysis.kpis.mouldCount === 0
+      ? 0
+      : analysis.kpis.mouldsReady / analysis.kpis.mouldCount
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(project)}
+      className="card card-interactive rise p-5 text-left"
+      style={stagger(index)}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden="true"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-base font-bold text-white"
+          style={{
+            background: project.specimen
+              ? PALETTE.inkFaint
+              : GRADIENT.brand,
+          }}
+        >
+          {project.name.slice(0, 2).toUpperCase()}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-bold tracking-tight">{project.name}</h3>
+            <StatusPill level={analysis.level} />
+            {project.specimen && (
+              <span
+                className="chip font-bold"
+                style={{
+                  backgroundColor: STATUS_WASH['limited-buffer'],
+                  color: STATUS_TEXT['limited-buffer'],
+                }}
+              >
+                SPECIMEN
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-(--color-ink-faint)">
+            {project.client} · {COPY.dataCurrencyPrefix} {project.dataAsOf}
+          </p>
+        </div>
+
+        <IconChevronRight className="mt-1 shrink-0 text-(--color-ink-faint)" />
+      </div>
+
+      {/* Says what is wrong, not merely that something is. */}
+      <p
+        className="mt-3 rounded-xl px-3 py-2 text-xs font-medium"
+        style={{
+          backgroundColor: STATUS_WASH[analysis.level],
+          color: STATUS_TEXT[analysis.level],
+        }}
+      >
+        {analysis.reason}
+      </p>
+
+      <dl className="mt-3 grid grid-cols-4 gap-3">
+        <Metric label="Pieces" value={String(analysis.kpis.totalPieces)} />
+        <Metric label="Products" value={String(analysis.kpis.uniqueItems)} />
+        <Metric
+          label="Next week"
+          value={
+            analysis.kpis.nextProductionWeek
+              ? formatWeek(analysis.kpis.nextProductionWeek)
+              : '—'
+          }
+        />
+        <Metric
+          label="Open"
+          value={String(open)}
+          color={open > 0 ? STATUS_TEXT[analysis.level] : undefined}
+        />
+      </dl>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Meter
+          label="Moulds ready"
+          value={`${analysis.kpis.mouldsReady}/${analysis.kpis.mouldCount}`}
+          ratio={readyRatio}
+          color={STATUS_COLOR['on-schedule']}
+        />
+        <Meter
+          label="Data readiness"
+          value={`${quality.available}/${quality.total}`}
+          ratio={quality.score}
+          color={PALETTE.primary}
+        />
+      </div>
+
+      <p className="mt-3 truncate text-[10px] text-(--color-ink-faint)">
+        {project.source}
+      </p>
+    </button>
+  )
+}
+
+function Meter({
+  label,
+  value,
+  ratio,
+  color,
+}: {
+  label: string
+  value: string
+  ratio: number
+  color: string
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-[11px]">
+        <span className="text-(--color-ink-faint)">{label}</span>
+        <span className="num font-semibold">{value}</span>
+      </div>
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-(--color-surface-sunken)">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${ratio * 100}%`, backgroundColor: color }}
+        />
+      </div>
     </div>
   )
 }

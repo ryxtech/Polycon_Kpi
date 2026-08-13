@@ -1,4 +1,4 @@
-import { PROCESS, WEEKLY_FORM_DAY_CAPACITY } from '@/config/process'
+import { PIECES_PER_MOULD_PER_WEEK, PROCESS } from '@/config/process'
 import { PALETTE, STATUS_COLOR } from '@/config/theme'
 import { formatPieces } from '@/lib/format'
 import { prefersReducedMotion } from '@/lib/motion'
@@ -60,90 +60,99 @@ export function CapacityChart({
           ))}
         </div>
 
-        <div className="relative min-w-0 flex-1">
-          <div
-            className="pointer-events-none absolute inset-x-0 top-0"
-            style={{ height: PLOT_HEIGHT }}
-            aria-hidden="true"
-          >
-            {ticks.map((tick) => (
-              <span
-                key={tick}
-                className="absolute inset-x-0 border-t border-(--color-gridline)"
-                style={{ bottom: `${(tick / scaleMax) * 100}%` }}
-              />
-            ))}
-          </div>
-
-          <div
-            className="relative flex items-end gap-[3px] overflow-x-auto"
-            style={{ height: PLOT_HEIGHT }}
-          >
-            {load.map((week, index) => {
-              const key = formatWeek(week.week)
-              const height = scaleMax === 0 ? 0 : (week.pieces / scaleMax) * 100
-              const color = week.overCapacity
-                ? STATUS_COLOR.critical
-                : week.tightCapacity
-                  ? STATUS_COLOR['limited-buffer']
-                  : PALETTE.primary
-              const selected = highlight === key
-              const dimmed = highlight !== null && !selected
-
-              const title = `${key} · ${formatPieces(week.pieces)} pcs · ${week.mouldCount} moulds · ${Math.round(week.utilisation * 100)}% of form capacity`
-
-              const bar = (
+        {/*
+          Bars, gridlines and week labels share ONE horizontal scroller. Keeping
+          the label row outside it let the row set the page width, which put a
+          sideways scrollbar on the whole document at phone widths.
+        */}
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div className="relative" style={{ minWidth: load.length * 19 }}>
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0"
+              style={{ height: PLOT_HEIGHT }}
+              aria-hidden="true"
+            >
+              {ticks.map((tick) => (
                 <span
-                  className="block w-full rounded-t-lg"
-                  style={{
-                    height: `${Math.max(height, 3)}%`,
-                    backgroundColor: color,
-                    opacity: dimmed ? 0.25 : 1,
-                    boxShadow: selected ? `0 0 0 2px ${PALETTE.surface}, 0 0 0 4px ${color}` : undefined,
-                    transformOrigin: 'bottom',
-                    animation: reduced
-                      ? undefined
-                      : `grow 520ms cubic-bezier(0.22,1,0.36,1) ${Math.min(index * 22, 500)}ms both`,
-                    transition: 'opacity 180ms ease, box-shadow 180ms ease',
-                  }}
+                  key={tick}
+                  className="absolute inset-x-0 border-t border-(--color-gridline)"
+                  style={{ bottom: `${(tick / scaleMax) * 100}%` }}
                 />
-              )
+              ))}
+            </div>
 
-              return (
-                <div
+            <div
+              className="relative flex items-end gap-[3px]"
+              style={{ height: PLOT_HEIGHT }}
+            >
+              {load.map((week, index) => {
+                const key = formatWeek(week.week)
+                const height = scaleMax === 0 ? 0 : (week.pieces / scaleMax) * 100
+                const color = week.overCapacity
+                  ? STATUS_COLOR.critical
+                  : week.tightCapacity
+                    ? STATUS_COLOR['limited-buffer']
+                    : PALETTE.primary
+                const selected = highlight === key
+                const dimmed = highlight !== null && !selected
+
+                const title = `${key} · ${formatPieces(week.pieces)} pcs planned · ${week.mouldCount} ${week.mouldCount === 1 ? 'mould' : 'moulds'} can yield ${week.pieceCapacity} · ${Math.round(week.utilisation * 100)}% of capacity`
+
+                const bar = (
+                  <span
+                    className="block w-full rounded-t-lg"
+                    style={{
+                      height: `${Math.max(height, 3)}%`,
+                      backgroundColor: color,
+                      opacity: dimmed ? 0.25 : 1,
+                      boxShadow: selected
+                        ? `0 0 0 2px ${PALETTE.surface}, 0 0 0 4px ${color}`
+                        : undefined,
+                      transformOrigin: 'bottom',
+                      animation: reduced
+                        ? undefined
+                        : `grow 520ms cubic-bezier(0.22,1,0.36,1) ${Math.min(index * 22, 500)}ms both`,
+                      transition: 'opacity 180ms ease, box-shadow 180ms ease',
+                    }}
+                  />
+                )
+
+                return (
+                  <div
+                    key={`${week.week.year}-${week.week.week}`}
+                    className="flex h-full min-w-4 flex-1 flex-col justify-end"
+                  >
+                    {onSelectWeek ? (
+                      <button
+                        type="button"
+                        title={title}
+                        aria-label={title}
+                        aria-pressed={selected}
+                        onClick={() => onSelectWeek(selected ? null : key)}
+                        className="flex h-full w-full cursor-pointer flex-col justify-end"
+                      >
+                        {bar}
+                      </button>
+                    ) : (
+                      <span title={title} className="flex h-full flex-col justify-end">
+                        {bar}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="mt-2 flex gap-[3px]">
+              {load.map((week) => (
+                <span
                   key={`${week.week.year}-${week.week.week}`}
-                  className="flex h-full min-w-[16px] flex-1 flex-col justify-end"
+                  className="num min-w-4 flex-1 text-center text-[10px] text-(--color-ink-faint)"
                 >
-                  {onSelectWeek ? (
-                    <button
-                      type="button"
-                      title={title}
-                      aria-label={title}
-                      aria-pressed={selected}
-                      onClick={() => onSelectWeek(selected ? null : key)}
-                      className="flex h-full w-full cursor-pointer flex-col justify-end"
-                    >
-                      {bar}
-                    </button>
-                  ) : (
-                    <span title={title} className="flex h-full flex-col justify-end">
-                      {bar}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="mt-2 flex gap-[3px]">
-            {load.map((week) => (
-              <span
-                key={`${week.week.year}-${week.week.week}`}
-                className="num min-w-[16px] flex-1 text-center text-[10px] text-(--color-ink-faint)"
-              >
-                {week.week.week}
-              </span>
-            ))}
+                  {week.week.week}
+                </span>
+              ))}
+            </div>
           </div>
           <p className="field mt-1 text-center">ISO week</p>
         </div>
@@ -151,10 +160,11 @@ export function CapacityChart({
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-(--color-gridline) pt-3 text-xs text-(--color-ink-muted)">
         <Swatch color={PALETTE.primary} label="Within capacity" />
-        <Swatch color={STATUS_COLOR['limited-buffer']} label="No headroom (≥75%)" />
-        <Swatch color={STATUS_COLOR.critical} label="Over capacity" />
-        <span className="num ml-auto text-(--color-ink-faint)">
-          {PROCESS.formsPerDay} forms/day · {WEEKLY_FORM_DAY_CAPACITY} form-days/week
+        <Swatch color={STATUS_COLOR['limited-buffer']} label="No headroom" />
+        <Swatch color={STATUS_COLOR.critical} label="Beyond mould capacity" />
+        <span className="ml-auto text-(--color-ink-faint)">
+          {PROCESS.piecesPerMouldPerDay} pc/mould/day ·{' '}
+          {PIECES_PER_MOULD_PER_WEEK} pcs per mould per week
         </span>
       </div>
 

@@ -1,5 +1,8 @@
 node_modules
-dist
 coverage
 *.local
 .DS_Store
+
+# local tooling artifacts
+.playwright-mcp/
+polycon-pages-live.png

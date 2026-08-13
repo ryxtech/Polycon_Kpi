@@ -1,9 +1,15 @@
 import type * as XLSXTypes from 'xlsx'
 import {
+  PRIORITY_BANDS,
+  PRIORITY_HEADERS,
   PRODUCTION_FLAG_HEADERS,
   PRODUCTION_FLAG_TRUTHY,
 } from '@/config/process'
-import type { MouldAvailability, ProductionRow } from '@/types/domain'
+import type {
+  MouldAvailability,
+  PriorityKey,
+  ProductionRow,
+} from '@/types/domain'
 import { extractWeekNumbers, inferWrapPivot, tokeniseWeeks } from './weeks'
 
 /**
@@ -18,7 +24,20 @@ export type RawRow = [
   availability: string | null,
   weeks: string,
   produced?: number | string | null,
+  priority?: number | string | null,
 ]
+
+/** What sheet List2 contributed, and whether it agrees with List1. */
+export interface LookupReconciliation {
+  /** Item to mould pairs List2 actually provides. */
+  mappings: number
+  /** List2 rows carrying an item but no mould — placeholders, safely skipped. */
+  incompleteRows: number
+  /** Items used in List1 that List2 does not map. */
+  missingFromLookup: string[]
+  /** Items where the two sheets name different moulds. */
+  disagreements: { item: string; sheet1: string; sheet2: string }[]
+}
 
 export interface ParseResult {
   rows: ProductionRow[]
@@ -26,7 +45,29 @@ export interface ParseResult {
   hasProductionFlag: boolean
   /** Header the flag was found under, for display. */
   productionFlagHeader: string | null
+  /** True when the source carried a priority column. */
+  hasPriority: boolean
+  /** Null when the workbook has no List2 sheet. */
+  lookup: LookupReconciliation | null
   warnings: string[]
+}
+
+/**
+ * Band a numeric priority.
+ *
+ * Null means the source has no priority for this row — reported as 'none'
+ * rather than silently folded into the least urgent band, because "we do not
+ * know" and "not urgent" are different claims.
+ */
+export function priorityKey(priority: number | null): PriorityKey {
+  if (priority === null) return 'none'
+  return PRIORITY_BANDS.find((band) => priority <= band.max)?.key ?? 'normal'
+}
+
+function parsePriority(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number.parseInt(String(value).replace(/[^\d]/g, ''), 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
 const READY_TO_SPRAY = 'READY TO SPRAY'
@@ -128,7 +169,8 @@ export function normaliseRows(raw: RawRow[], baseYear: number): ProductionRow[] 
 
   return populated
     .map((row) => {
-      const [item, qty, callOff, mould, availability, weeks, produced] = row
+      const [item, qty, callOff, mould, availability, weeks, produced, priority] =
+        row
       const quantity = parseQty(qty)
 
       return {
@@ -147,6 +189,7 @@ export function normaliseRows(raw: RawRow[], baseYear: number): ProductionRow[] 
               : isFlagTruthy(produced)
                 ? quantity
                 : 0,
+        priority: parsePriority(priority),
       }
     })
 }
@@ -231,6 +274,8 @@ export async function parseWorkbook(
       rows: [],
       hasProductionFlag: false,
       productionFlagHeader: null,
+      hasPriority: false,
+      lookup: null,
       warnings: ['The workbook contains no sheets.'],
     }
   }
@@ -247,6 +292,8 @@ export async function parseWorkbook(
       rows: [],
       hasProductionFlag: false,
       productionFlagHeader: null,
+      hasPriority: false,
+      lookup: null,
       warnings: [`Sheet "${sheetName}" has no data rows.`],
     }
   }
@@ -269,12 +316,15 @@ export async function parseWorkbook(
       ? headerIndex(headers, ['PRODUCTION (WEEK)', 'PRODUCTION WEEK', 'WEEK', 'WEEKS'])
       : findHeaderStartingWith(headers, 'PRODUCTION')
   const flagCol = headerIndex(headers, PRODUCTION_FLAG_HEADERS)
+  const priorityCol = headerIndex(headers, PRIORITY_HEADERS)
 
   if (itemCol === -1) {
     return {
       rows: [],
       hasProductionFlag: false,
       productionFlagHeader: null,
+      hasPriority: false,
+      lookup: null,
       warnings: [
         `Could not find an ITEM column in sheet "${sheetName}". Found: ${headers.filter(Boolean).join(', ')}`,
       ],
@@ -285,7 +335,29 @@ export async function parseWorkbook(
   if (weeksCol === -1) warnings.push('No production week column found — the timeline will be empty.')
 
   const mouldLookup = buildMouldLookup(workbook, xlsx)
+  const lookupSheet = workbook.SheetNames.find((name) => /list ?2/i.test(name))
   let resolvedByLookup = 0
+  let incompleteLookupRows = 0
+
+  if (lookupSheet) {
+    // Count List2 rows naming an item but no mould. In the supplied file these
+    // read just "SL-300"; they are placeholders and are skipped rather than
+    // treated as a mapping to nothing.
+    const grid2 = xlsx.utils.sheet_to_json<unknown[]>(workbook.Sheets[lookupSheet], {
+      header: 1,
+      defval: null,
+      raw: true,
+    })
+    for (const row of grid2) {
+      if (!Array.isArray(row)) continue
+      const item = row.find(
+        (cell) => typeof cell === 'string' && /^(SL-|BES|NHK)/i.test(cell.trim()),
+      )
+      if (!item) continue
+      const hasMould = row.some((cell) => /^(NHK|BES)/i.test(String(cell ?? '')))
+      if (!hasMould) incompleteLookupRows += 1
+    }
+  }
 
   const rawRows: RawRow[] = []
 
@@ -313,6 +385,7 @@ export async function parseWorkbook(
       availabilityCol === -1 ? null : (row[availabilityCol] as string | null),
       weeksCol === -1 ? '' : String(row[weeksCol] ?? ''),
       flagCol === -1 ? null : (row[flagCol] as string | null),
+      priorityCol === -1 ? null : (row[priorityCol] as string | null),
     ])
   }
 
@@ -322,10 +395,56 @@ export async function parseWorkbook(
     )
   }
 
+  const parsedRows = normaliseRows(rawRows, baseYear)
+
+  /*
+   * Reconcile the two sheets.
+   *
+   * List1's MOLD DESIGNATION is a VLOOKUP into List2, so they agree by
+   * construction — but a hand-maintained workbook drifts, and a silent
+   * disagreement would put the wrong mould on a real schedule.
+   */
+  let lookup: LookupReconciliation | null = null
+  if (lookupSheet) {
+    const missingFromLookup: string[] = []
+    const disagreements: LookupReconciliation['disagreements'] = []
+
+    for (const row of parsedRows) {
+      const mapped = mouldLookup.get(row.item)
+      if (!mapped) {
+        if (!missingFromLookup.includes(row.item)) missingFromLookup.push(row.item)
+        continue
+      }
+      if (row.mould && row.mould !== mapped) {
+        disagreements.push({ item: row.item, sheet1: row.mould, sheet2: mapped })
+      }
+    }
+
+    lookup = {
+      mappings: mouldLookup.size,
+      incompleteRows: incompleteLookupRows,
+      missingFromLookup,
+      disagreements,
+    }
+
+    if (disagreements.length > 0) {
+      warnings.push(
+        `${disagreements.length} item${disagreements.length === 1 ? '' : 's'} name a different mould in List1 than in List2 — List1 was used.`,
+      )
+    }
+    if (missingFromLookup.length > 0) {
+      warnings.push(
+        `${missingFromLookup.length} item${missingFromLookup.length === 1 ? '' : 's'} used in List1 are not mapped in List2.`,
+      )
+    }
+  }
+
   return {
-    rows: normaliseRows(rawRows, baseYear),
+    rows: parsedRows,
     hasProductionFlag: flagCol !== -1,
     productionFlagHeader: flagCol === -1 ? null : headers[flagCol],
+    hasPriority: priorityCol !== -1,
+    lookup,
     warnings,
   }
 }

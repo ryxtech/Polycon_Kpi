@@ -8,36 +8,54 @@
  * Nothing in the application hardcodes these values; every derivation and
  * every label reads them from here.
  */
+/**
+ * Manufacturing constants.
+ *
+ * Two distinct processes, and conflating them is the easiest mistake to make
+ * here: `formsPerDay`, `materialPreparationDays` and `formProductionDays`
+ * describe *building a mould*, and come from the form-production schedule PDF.
+ * `piecesPerMouldPerDay` describes *using* one, and comes from Marek directly:
+ *
+ *   "production of these 8 pcs follow up in continual production
+ *    1 pc / 1 mold / 1 day … if there is required 13 pcs then production
+ *    will follow 13 working consecutive days"
+ */
 export const PROCESS = {
-  /** Moulds that can be in production simultaneously on any given day. */
+  /** Moulds that can be *manufactured* simultaneously on any given day. */
   formsPerDay: 3,
   /** Days of material preparation before a form enters production. */
   materialPreparationDays: 1,
-  /** Days a form spends in production. */
+  /** Days a form spends being manufactured. */
   formProductionDays: 2,
-  /** Working days per calendar week, used to convert buffers to working days. */
+  /**
+   * Elements one finished mould yields per working day.
+   *
+   * The single most consequential number in the model: it turns a quantity
+   * directly into a duration, so N pieces on a mould is N working days on that
+   * mould, and a mould's schedule is feasible only if its window holds them.
+   */
+  piecesPerMouldPerDay: 1,
+  /** Working days per calendar week. */
   workingDaysPerWeek: 5,
 } as const
 
 /**
- * Weekly capacity expressed in form-days.
- *
- * The stated limit is 3 forms *simultaneously per day*, so a week offers
- * 3 x 5 = 15 form-days. A mould scheduled in a week occupies its production
- * duration, so demand is `moulds x 2 form-days`.
- *
- * Counting distinct moulds per week and comparing that to 3 would be wrong:
- * four moulds in a week is not a breach if they run on different days.
+ * Weekly capacity for *manufacturing* moulds, in form-days.
+ * Retained for the form schedule; it is not the element-production limit.
  */
 export const WEEKLY_FORM_DAY_CAPACITY =
   PROCESS.formsPerDay * PROCESS.workingDaysPerWeek
+
+/** Pieces one mould can yield in a full working week. */
+export const PIECES_PER_MOULD_PER_WEEK =
+  PROCESS.piecesPerMouldPerDay * PROCESS.workingDaysPerWeek
 
 export const CAPACITY = {
   /**
    * Utilisation at or above which a week has no meaningful headroom. Below a
    * full breach, but tight enough that any slippage cascades.
    */
-  tightUtilisation: 0.75,
+  tightUtilisation: 0.85,
 } as const
 
 /**
@@ -78,6 +96,28 @@ export const CALENDAR = {
   /** ...and one at or below this is running early. Both present means it wrapped. */
   wrapDetectionEarlyWeek: 10,
 } as const
+
+/** Column headers carrying a production priority, if the source has one. */
+export const PRIORITY_HEADERS = [
+  'PRIORITY',
+  'PRIO',
+  'PRIO.',
+  'PRIORITA',
+  'PRIORITÄT',
+] as const
+
+/**
+ * Priority bands.
+ *
+ * The brief asks for 1-5 filtering shown as Critical / High / Normal. Polycon's
+ * own form schedule groups by "PRIORITY 1", "PRIORITY 4", "PRIORITY 5" and
+ * "NO PRIORITY", so 1 is the most urgent and unassigned is the least.
+ */
+export const PRIORITY_BANDS = [
+  { max: 1, key: 'critical', label: 'Critical' },
+  { max: 3, key: 'high', label: 'High' },
+  { max: 99, key: 'normal', label: 'Normal' },
+] as const
 
 /** Column headers that, if present, mark an element as produced. */
 export const PRODUCTION_FLAG_HEADERS = [

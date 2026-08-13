@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Card } from '@/components/Card'
-import { IconUpload } from '@/components/icons'
+import { DataReadiness } from '@/views/DataReadiness'
+import { IconCheck, IconUpload } from '@/components/icons'
 import { GRADIENT } from '@/config/theme'
 import { COPY } from '@/config/copy'
 import { HIRSLANDEN_BASE_YEAR } from '@/data/hirslanden.seed'
@@ -14,6 +15,21 @@ interface IntakeViewProps {
   onContinue: () => void
 }
 
+/**
+ * Pipeline stages, in the order the parser actually runs them.
+ *
+ * Each is marked done only once the corresponding work has completed — the
+ * list reports what happened, it does not animate through a script.
+ */
+const STAGES = [
+  'Reading spreadsheet',
+  'Identifying columns',
+  'Resolving moulds and call-offs',
+  'Parsing production weeks',
+  'Calculating capacity and risk',
+  'Composing report',
+] as const
+
 interface ImportSummary {
   fileName: string
   rowCount: number
@@ -23,6 +39,9 @@ interface ImportSummary {
   callOffs: number
   hasProductionFlag: boolean
   productionFlagHeader: string | null
+  hasPriority: boolean
+  lookupMappings: number | null
+  lookupIncomplete: number
   warnings: string[]
 }
 
@@ -38,18 +57,32 @@ export function IntakeView({ project, onImported, onContinue }: IntakeViewProps)
   const [summary, setSummary] = useState<ImportSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [stage, setStage] = useState(-1)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFile = async (file: File) => {
     setBusy(true)
     setError(null)
+    setSummary(null)
+    setStage(0)
+
+    // A frame between stages so each tick is actually seen; the work either
+    // side of it is real.
+    const advance = async (to: number) => {
+      setStage(to)
+      await new Promise((resolve) => setTimeout(resolve, 220))
+    }
 
     try {
       const buffer = await file.arrayBuffer()
+      await advance(1)
+
       const result = await parseWorkbook(buffer, HIRSLANDEN_BASE_YEAR)
+      await advance(2)
 
       if (result.rows.length === 0) {
+        setStage(-1)
         setError(
           result.warnings[0] ??
             'No usable rows were found. Expected columns ITEM, QTY, CALL OFF, MOLD DESIGNATION, MOLD WILL BE DONE and PRODUCTION (WEEK).',
@@ -72,7 +105,10 @@ export function IntakeView({ project, onImported, onContinue }: IntakeViewProps)
         encodedMoulds: undefined,
       }
 
+      await advance(3)
       const analysis = analyseProject(imported)
+      await advance(4)
+      await advance(5)
 
       setSummary({
         fileName: file.name,
@@ -83,6 +119,9 @@ export function IntakeView({ project, onImported, onContinue }: IntakeViewProps)
         callOffs: analysis.kpis.callOffCount,
         hasProductionFlag: result.hasProductionFlag,
         productionFlagHeader: result.productionFlagHeader,
+        hasPriority: result.hasPriority,
+        lookupMappings: result.lookup?.mappings ?? null,
+        lookupIncomplete: result.lookup?.incompleteRows ?? 0,
         warnings: result.warnings,
       })
 
@@ -90,13 +129,14 @@ export function IntakeView({ project, onImported, onContinue }: IntakeViewProps)
     } catch {
       setError('That file could not be read as a spreadsheet.')
       setSummary(null)
+      setStage(-1)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    <div className="mx-auto max-w-4xl space-y-4">
       <header className="rise">
         <h1 className="text-2xl font-bold tracking-tight">Import production data</h1>
         <p className="mt-0.5 text-sm text-(--color-ink-muted)">
@@ -157,6 +197,51 @@ export function IntakeView({ project, onImported, onContinue }: IntakeViewProps)
         </button>
       </section>
 
+      {/*
+        The readiness breakdown lives here rather than in the report pages.
+        Which columns the spreadsheet carries is Polycon's concern, not their
+        customer's — and this is already the screen about their source.
+      */}
+      <DataReadiness project={project} />
+
+      {stage >= 0 && (
+        <Card title="Processing" subtitle={busy ? 'Working…' : 'Complete'}>
+          <ol className="space-y-2">
+            {STAGES.map((label, index) => {
+              const done = stage > index
+              const active = stage === index
+              return (
+                <li
+                  key={label}
+                  className="flex items-center gap-2.5 text-[13px]"
+                  style={{ opacity: done || active ? 1 : 0.4 }}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-white"
+                    style={{
+                      background: done
+                        ? 'var(--color-ok)'
+                        : active
+                          ? 'var(--color-primary)'
+                          : 'var(--color-surface-sunken)',
+                    }}
+                  >
+                    {done && <IconCheck size={12} />}
+                  </span>
+                  <span className={done || active ? 'text-(--color-ink)' : ''}>
+                    {label}
+                  </span>
+                  {done && (
+                    <span className="ml-auto text-xs text-(--color-ok)">Done</span>
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+        </Card>
+      )}
+
       {error && (
         <p
           role="alert"
@@ -188,6 +273,24 @@ export function IntakeView({ project, onImported, onContinue }: IntakeViewProps)
                   : `No production flag column. ${COPY.completionPending}`
               }
             />
+            <Check
+              ok={summary.hasPriority}
+              text={
+                summary.hasPriority
+                  ? 'Priority column found — priority filtering is available.'
+                  : 'No priority column. Priority filtering stays disabled.'
+              }
+            />
+            {summary.lookupMappings !== null && (
+              <Check
+                ok
+                text={`Sheet List2 reconciled — ${summary.lookupMappings} item-to-mould mappings agree with List1${
+                  summary.lookupIncomplete > 0
+                    ? `, ${summary.lookupIncomplete} placeholder ${summary.lookupIncomplete === 1 ? 'row' : 'rows'} skipped`
+                    : ''
+                }.`}
+              />
+            )}
             {summary.warnings.map((warning) => (
               <Check key={warning} ok={false} text={warning} />
             ))}
