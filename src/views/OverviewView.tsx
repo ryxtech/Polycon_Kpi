@@ -9,6 +9,7 @@ import { HelpTip } from '@/components/HelpTip'
 import { KpiTile } from '@/components/KpiTile'
 import { ProgressBreakdown } from '@/components/ProgressBreakdown'
 import { StatusPill } from '@/components/StatusPill'
+import { WeekDetailPanel } from '@/components/WeekDetailPanel'
 import {
   IconAlert,
   IconCalendar,
@@ -26,6 +27,7 @@ import {
   type CrossFilter,
 } from '@/lib/crossFilter'
 import { pluralise } from '@/lib/format'
+import { describeWeek } from '@/lib/weekDetail'
 import { formatWeek, formatWeekLong } from '@/lib/weeks'
 import type { Project } from '@/types/domain'
 
@@ -75,6 +77,18 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
     () => (filter ? analyseRows(filteredRows, project) : analysis),
     [filter, filteredRows, project, analysis],
   )
+
+  /*
+   * Built from the unfiltered rows on purpose. The chart always plots the whole
+   * schedule, so the panel beneath it must describe the same population — using
+   * the cross-filtered rows would make a week appear to shrink the moment it
+   * was selected.
+   */
+  const weekDetail = useMemo(() => {
+    if (filter?.dimension !== 'week') return null
+    const match = analysis.load.find((week) => formatWeek(week.week) === filter.value)
+    return match ? describeWeek(project.rows, match.week) : null
+  }, [filter, analysis.load, project.rows])
 
   const { kpis, moulds, callOffs, findings, level } = view
 
@@ -185,21 +199,29 @@ export function OverviewView({ project, analysis }: OverviewViewProps) {
           title="Weekly production load"
           subtitle={
             analysis.kpis.firstWeek && analysis.kpis.lastWeek
-              ? `${formatWeek(analysis.kpis.firstWeek)} → ${formatWeek(analysis.kpis.lastWeek)} · select a week to filter the report`
+              ? `${formatWeek(analysis.kpis.firstWeek)} → ${formatWeek(analysis.kpis.lastWeek)} · planned pieces against mould capacity`
               : 'No schedule'
           }
           actions={<StatusPill level={level} />}
         >
           {analysis.load.length > 0 ? (
-            <CapacityChart
-              load={analysis.load}
-              highlight={filter?.dimension === 'week' ? filter.value : null}
-              onSelectWeek={(selected) =>
-                selected === null
-                  ? setFilter(null)
-                  : toggle(filterBy.week(selected))
-              }
-            />
+            <>
+              <CapacityChart
+                load={analysis.load}
+                highlight={filter?.dimension === 'week' ? filter.value : null}
+                onSelectWeek={(selected) =>
+                  selected === null
+                    ? setFilter(null)
+                    : toggle(filterBy.week(selected))
+                }
+              />
+              {weekDetail && (
+                <WeekDetailPanel
+                  detail={weekDetail}
+                  onClose={() => setFilter(null)}
+                />
+              )}
+            </>
           ) : (
             <p className="text-sm text-(--color-ink-muted)">
               No element-level schedule for this project — see Production plan.

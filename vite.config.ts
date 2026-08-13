@@ -5,7 +5,8 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: './',
+  // Absolute, so assets still resolve from a nested /shared/<token> path.
+  base: '/',
   // `strictPort` makes a clash fail loudly rather than silently moving to
   // another port — a moved port is how a stale tab ends up being demoed.
   server: {
@@ -23,7 +24,7 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'node',
+    environment: 'jsdom',
     include: ['src/**/*.test.ts'],
   },
 })

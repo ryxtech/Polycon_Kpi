@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AttentionPanel } from '@/components/AttentionPanel'
 import { StatusPill } from '@/components/StatusPill'
+import { SharePopover } from '@/components/SharePopover'
 import { COPY } from '@/config/copy'
 import {
   GRADIENT,
@@ -16,6 +17,8 @@ import type { Project } from '@/types/domain'
 interface ExportReportViewProps {
   project: Project
   analysis: ProjectAnalysis
+  /** False in the customer view — a shared link cannot re-share itself. */
+  canShare?: boolean
 }
 
 const SECTIONS = [
@@ -34,7 +37,11 @@ type SectionId = (typeof SECTIONS)[number]['id']
  * `window.print()` against the print stylesheet avoids a PDF dependency, and
  * guarantees the client receives exactly the document they previewed.
  */
-export function ExportReportView({ project, analysis }: ExportReportViewProps) {
+export function ExportReportView({
+  project,
+  analysis,
+  canShare = false,
+}: ExportReportViewProps) {
   const [selected, setSelected] = useState<Set<SectionId>>(
     () => new Set(SECTIONS.map((section) => section.id)),
   )
@@ -53,13 +60,18 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
   return (
     <div className="space-y-4">
       <div className="no-print">
-        <h1 className="text-2xl font-bold tracking-tight">Export customer report</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Customer report</h1>
         <p className="mt-0.5 text-sm text-(--color-ink-muted)">
-          Choose the sections to include, then print to PDF.
+          {canShare
+            ? 'Share a link that always shows the latest data, or print a PDF snapshot.'
+            : 'Choose the sections to include, then print to PDF.'}
         </p>
       </div>
 
-      <div className="card rise no-print px-5 py-4">
+      {/* Stacks above the report card below it: the `rise` transform makes
+          this a stacking context, so the popover's own z-index cannot lift it
+          over a later sibling on its own. */}
+      <div className="card rise no-print relative z-20 px-5 py-4">
         <fieldset>
           <legend className="field mb-2">Sections</legend>
           <div className="flex flex-wrap gap-x-6 gap-y-2">
@@ -80,15 +92,26 @@ export function ExportReportView({ project, analysis }: ExportReportViewProps) {
           </div>
         </fieldset>
 
-        <button
-          type="button"
-          onClick={() => window.print()}
-          disabled={selected.size === 0}
-          className="mt-4 cursor-pointer rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-[var(--shadow-rest)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ background: GRADIENT.brand }}
-        >
-          Generate PDF
-        </button>
+        <div className="mt-4 flex flex-wrap gap-2.5">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            disabled={selected.size === 0}
+            className="min-h-11 cursor-pointer rounded-xl px-5 text-sm font-semibold text-white shadow-[var(--shadow-rest)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ background: GRADIENT.brand }}
+          >
+            Download PDF
+          </button>
+
+          {canShare && <SharePopover project={project} />}
+        </div>
+
+        {canShare && (
+          <p className="mt-2.5 text-[11px] leading-relaxed text-(--color-ink-faint)">
+            A link stays current as the Excel is updated. A PDF is a snapshot of
+            today and will not.
+          </p>
+        )}
       </div>
 
       <article className="card rise space-y-7 p-8">

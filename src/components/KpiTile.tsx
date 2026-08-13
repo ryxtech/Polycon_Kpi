@@ -56,9 +56,15 @@ export function KpiTile({
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <p className="field flex items-center gap-1.5">
-            <span className="truncate">{label}</span>
-            {help && <HelpTip label={label} {...help} />}
+          {/* Wraps rather than truncates: "Overall producti…" tells a reader
+              nothing, and the help icon costs enough width to trigger it. */}
+          <p className="field flex items-start gap-1.5 leading-snug">
+            <span className="min-w-0">{label}</span>
+            {help && (
+              <span className="mt-px shrink-0">
+                <HelpTip label={label} {...help} />
+              </span>
+            )}
           </p>
 
           <p className="mt-2 flex items-baseline gap-1.5">

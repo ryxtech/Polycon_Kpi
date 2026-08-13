@@ -160,6 +160,17 @@ export function IconCheck({ className = '', size = 18 }: IconProps) {
   )
 }
 
+export function IconShare({ className = '', size = 18 }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <circle cx="18" cy="5.5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="18.5" r="2.5" />
+      <path d="m8.3 10.8 7.4-4.1M8.3 13.2l7.4 4.1" />
+    </svg>
+  )
+}
+
 export function IconChevronRight({ className = '', size = 14 }: IconProps) {
   return (
     <svg {...base(size, className)}>

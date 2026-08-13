@@ -49,18 +49,30 @@ export function HelpTip({ what, columns, missing = false, label }: HelpTipProps)
 
   return (
     <span ref={wrapRef} className="relative inline-flex">
+      {/*
+        The glyph stays 20px; the button box is 44px.
+        Padding grows the hit area to the touch minimum and an equal negative
+        margin gives the space back to the layout, so nothing moves on screen.
+        Sizing the visible circle up instead would have pushed the KPI labels
+        around — the mark is meant to be unobtrusive, the target is not.
+      */}
       <button
         type="button"
         onClick={() => setOpen((previous) => !previous)}
         aria-expanded={open}
         aria-label={`What does ${label} mean?`}
-        className="grid h-5 w-5 cursor-pointer place-items-center rounded-full text-[11px] font-bold transition-colors"
-        style={{
-          backgroundColor: open ? PALETTE.primary : PALETTE.surfaceSunken,
-          color: open ? '#fff' : PALETTE.inkFaint,
-        }}
+        className="-m-3 grid cursor-pointer place-items-center p-3"
       >
-        ?
+        <span
+          aria-hidden="true"
+          className="grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold transition-colors"
+          style={{
+            backgroundColor: open ? PALETTE.primary : PALETTE.surfaceSunken,
+            color: open ? '#fff' : PALETTE.inkFaint,
+          }}
+        >
+          ?
+        </span>
       </button>
 
       {open && (

@@ -356,9 +356,58 @@ the tests fail.
 
 ---
 
-## 10. Out of scope
+## 10. Customer share links
+
+Polycon's alternative is to export a PDF and email it — a snapshot that is stale
+the moment the spreadsheet changes, and that someone must remember to re-send.
+A link does not go stale: the customer opens the same address and sees whatever
+was last imported.
+
+### 10.1 Design
+
+- **`/shared/<token>`**, token being 32 URL-safe characters from
+  `crypto.getRandomValues`. The project id is deliberately *not* in the URL —
+  `/shared/hirslandenklinik` would invite anyone holding one link to try
+  `/shared/beethovenstrasse`.
+- **No schedule data travels in the URL**, so a link cannot be edited to display
+  figures that were never published.
+- **Allow-list of visible pages**: Overview, Production plan, Mould readiness,
+  Detailed schedule, Report. A page added later is internal until someone
+  decides otherwise — the safe direction for an oversight to fall.
+- **Revocable.** Withdrawing a link is the important control: projects end,
+  contacts change, figures get corrected. Re-opening the dialog reuses the
+  existing token, so a link already sent keeps working.
+
+### 10.2 Accepted prototype limitations
+
+Both are stated in the share dialog rather than left to be discovered:
+
+1. **Not private.** Anyone holding the link can open it — no password, no
+   expiry, no record of who opened what. Accepted for the prototype.
+2. **Revocation is per-browser.** Tokens live in `localStorage`, so the
+   behaviour is real but the storage is not.
+
+### 10.3 What the hosted version needs
+
+| Concern | Prototype | Hosted |
+| --- | --- | --- |
+| Token store | `localStorage` | Server-side, so revoking reaches every holder |
+| Data | Bundled seed / session import | Persisted per project, updated on import |
+| Access | Anyone with the link | Per-customer, optionally with a sign-in |
+| Expiry | None | Configurable, with a default |
+| Audit | None | Who opened what, and when |
+| Routing | Vite SPA fallback | Server must serve `index.html` for `/shared/*` |
+
+The last row is the only one that will break silently: a static host that
+404s unknown paths will kill every link. `vercel.json`, `netlify.toml` or an
+nginx `try_files` rule is required.
+
+---
+
+## 11. Out of scope
 
 - Live synchronisation with Excel — the file is not an API
 - Authentication, persistence, backend of any kind
 - Real PDF generation beyond print-to-PDF
+- Authentication, per-customer access control and audit logging
 - Invented sibling projects in the portfolio

@@ -12,12 +12,17 @@ import {
 } from '@/components/icons'
 import { COPY } from '@/config/copy'
 import {
+  isClientVisible,
+  readTokenFromPath,
+  resolveShareToken,
+} from '@/lib/shareLink'
+import {
   GRADIENT,
   PALETTE,
   STATUS_TEXT,
   STATUS_WASH,
 } from '@/config/theme'
-import { HIRSLANDENKLINIK } from '@/data/projects'
+import { HIRSLANDENKLINIK, findProject } from '@/data/projects'
 import { useProjectAnalysis } from '@/hooks/useProjectAnalysis'
 import { ExportReportView } from '@/views/ExportReportView'
 import { IntakeView } from '@/views/IntakeView'
@@ -63,39 +68,85 @@ const REPORT_PAGES: NavItem[] = [
 ]
 
 export default function App() {
-  const [view, setView] = useState<ViewId>('portfolio')
-  const [project, setProject] = useState<Project>(HIRSLANDENKLINIK)
+  /*
+   * A ?share= link opens a read-only customer view of one project.
+   *
+   * Resolved once at mount rather than tracked as state: a shared link is a
+   * mode the page is in, not something the visitor can navigate out of. If the
+   * id does not resolve the app falls back to the internal view rather than
+   * rendering an empty shell.
+   */
+  const [shareState] = useState(() => {
+    if (typeof window === 'undefined') return { mode: 'internal' as const }
+    const token = readTokenFromPath(window.location.pathname)
+    if (!token) return { mode: 'internal' as const }
+
+    const projectId = resolveShareToken(token)
+    const project = projectId ? findProject(projectId) : undefined
+    // A token that no longer resolves means the link was withdrawn — say so
+    // rather than silently dropping the visitor into the internal view.
+    return project
+      ? { mode: 'client' as const, project }
+      : { mode: 'revoked' as const }
+  })
+
+  const shared = shareState.mode === 'client' ? shareState.project : null
+
+  const [view, setView] = useState<ViewId>(shared ? 'overview' : 'portfolio')
+  const [project, setProject] = useState<Project>(shared ?? HIRSLANDENKLINIK)
   const analysis = useProjectAnalysis(project)
 
+  const clientMode = shared !== null
+  const pages = clientMode
+    ? REPORT_PAGES.filter((page) => isClientVisible(page.id))
+    : REPORT_PAGES
+
   const inReport = view !== 'portfolio' && view !== 'intake'
-  const activePage = REPORT_PAGES.find((page) => page.id === view)
+  const activePage = pages.find((page) => page.id === view)
 
   const openProject = (next: Project) => {
     setProject(next)
     setView('overview')
   }
 
+  if (shareState.mode === 'revoked') return <RevokedLink />
+
   return (
     <div className="flex min-h-dvh flex-col">
       <div className="no-print sticky top-0 z-30">
         <TopBar
           project={project}
-          crumbs={[
-            { label: 'Portfolio', onClick: () => setView('portfolio') },
-            ...(inReport ? [{ label: project.name }] : []),
-            ...(activePage ? [{ label: activePage.label }] : []),
-            ...(view === 'intake' ? [{ label: 'Import data' }] : []),
-          ]}
+          clientMode={clientMode}
+          crumbs={
+            clientMode
+              ? [
+                  { label: project.name },
+                  ...(activePage ? [{ label: activePage.label }] : []),
+                ]
+              : [
+                  { label: 'Portfolio', onClick: () => setView('portfolio') },
+                  ...(inReport ? [{ label: project.name }] : []),
+                  ...(activePage ? [{ label: activePage.label }] : []),
+                  ...(view === 'intake' ? [{ label: 'Import data' }] : []),
+                ]
+          }
           onImport={() => setView('intake')}
         />
 
         {inReport && (
-          <MobilePageTabs active={view} onSelect={setView} level={analysis.level} />
+          <MobilePageTabs
+            pages={pages}
+            active={view}
+            onSelect={setView}
+            level={analysis.level}
+          />
         )}
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {inReport && <Rail active={view} onSelect={setView} level={analysis.level} />}
+        {inReport && (
+          <Rail pages={pages} active={view} onSelect={setView} level={analysis.level} />
+        )}
 
         <main className="min-w-0 flex-1">
           {project.specimen && (
@@ -137,7 +188,11 @@ export default function App() {
             {view === 'raw' && <RawDataView project={project} />}
 
             {view === 'export' && (
-              <ExportReportView project={project} analysis={analysis} />
+              <ExportReportView
+                project={project}
+                analysis={analysis}
+                canShare={!clientMode}
+              />
             )}
           </div>
         </main>
@@ -149,6 +204,38 @@ export default function App() {
           the intelligence and presentation layer.
         </p>
       </footer>
+    </div>
+  )
+}
+
+/**
+ * Shown when a share token no longer resolves.
+ *
+ * Withdrawing a link has to look like something on the customer's side, or
+ * "Stop sharing" is a button that appears to do nothing.
+ */
+function RevokedLink() {
+  return (
+    <div className="grid min-h-dvh place-items-center px-6">
+      <div className="card max-w-md p-8 text-center">
+        <span
+          aria-hidden="true"
+          className="mx-auto grid h-12 w-12 place-items-center rounded-2xl text-xl font-bold text-white"
+          style={{ background: GRADIENT.brand }}
+        >
+          P
+        </span>
+        <h1 className="mt-4 text-lg font-bold tracking-tight">
+          This link is no longer active
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-(--color-ink-muted)">
+          The report it pointed to has stopped being shared. Please contact
+          Polycon if you still need access.
+        </p>
+        <p className="mt-4 border-t border-(--color-gridline) pt-3 text-[11px] text-(--color-ink-faint)">
+          {COPY.footer}
+        </p>
+      </div>
     </div>
   )
 }
@@ -189,10 +276,12 @@ function TopBar({
   project,
   crumbs,
   onImport,
+  clientMode,
 }: {
   project: Project
   crumbs: Crumb[]
   onImport: () => void
+  clientMode: boolean
 }) {
   return (
     <header className="frosted">
@@ -262,15 +351,21 @@ function TopBar({
               {COPY.nextRefresh}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onImport}
-            className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-4 text-[13px] font-semibold text-white shadow-[var(--shadow-rest)] transition-transform hover:-translate-y-px"
-            style={{ background: GRADIENT.brand }}
-          >
-            <IconUpload size={15} />
-            <span className="hidden sm:inline">Import data</span>
-          </button>
+          {clientMode ? (
+            <span className="chip bg-(--color-surface-sunken) text-(--color-ink-muted)">
+              Shared by Polycon
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={onImport}
+              className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-4 text-[13px] font-semibold text-white shadow-[var(--shadow-rest)] transition-transform hover:-translate-y-px"
+              style={{ background: GRADIENT.brand }}
+            >
+              <IconUpload size={15} />
+              <span className="hidden sm:inline">Import data</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
@@ -286,10 +381,12 @@ function TopBar({
  * covering content the way a bottom bar would on a data-dense page.
  */
 function MobilePageTabs({
+  pages,
   active,
   onSelect,
   level,
 }: {
+  pages: NavItem[]
   active: ViewId
   onSelect: (id: ViewId) => void
   level: Parameters<typeof StatusPill>[0]['level']
@@ -300,7 +397,7 @@ function MobilePageTabs({
       className="md:hidden"
     >
       <div className="flex items-center gap-2 overflow-x-auto px-4 pb-2.5">
-        {REPORT_PAGES.map((page) => {
+        {pages.map((page) => {
           const Icon = page.icon
           const isActive = active === page.id
 
@@ -338,10 +435,12 @@ function MobilePageTabs({
  * "Production plan" and "Mould readiness" guesswork.
  */
 function Rail({
+  pages,
   active,
   onSelect,
   level,
 }: {
+  pages: NavItem[]
   active: ViewId
   onSelect: (id: ViewId) => void
   level: Parameters<typeof StatusPill>[0]['level']
@@ -357,7 +456,7 @@ function Rail({
         <p className="field px-3 pb-2">Report pages</p>
 
         <ul className="space-y-1">
-          {REPORT_PAGES.map((page) => {
+          {pages.map((page) => {
             const Icon = page.icon
             const isActive = active === page.id
 

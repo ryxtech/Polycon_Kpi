@@ -66,8 +66,21 @@ async function auditPage(page, label, viewport) {
     for (const el of document.body.querySelectorAll(
       'button, a, select, input, [role="button"]',
     )) {
-      const r = el.getBoundingClientRect()
+      let r = el.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) continue
+
+      /*
+       * A control wrapped in its own label is tapped through the label, so the
+       * label's box is the real target. Measuring the bare input reported a
+       * 20px checkbox as unreachable when the whole 44px row already toggles
+       * it — a false positive that hides the genuine ones.
+       */
+      const label = el.closest('label')
+      if (label && label.contains(el)) {
+        const lr = label.getBoundingClientRect()
+        if (lr.height > r.height) r = lr
+      }
+
       if (r.height < 40) {
         small.push({
           tag: el.tagName.toLowerCase(),
